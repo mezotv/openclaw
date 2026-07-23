@@ -82,6 +82,11 @@ export type SeedScenario = {
   successCriteria: string[];
   docsRefs?: string[];
   codeRefs?: string[];
+  execution?: {
+    kind?: "flow" | "playwright" | "script" | "vitest";
+    channel?: string;
+  };
+  runtimePairLane?: "core" | "extended" | "soak";
 };
 
 export type Bootstrap = {
@@ -101,6 +106,13 @@ export type Bootstrap = {
   runnerCatalog: {
     status: "loading" | "ready" | "failed";
     real: RunnerModelOption[];
+    channels: string[];
+    profiles: Array<{
+      id: string;
+      evidenceMode: "full" | "slim";
+      channelDriver: "qa-channel" | "crabline" | "live";
+      categoryIds: string[];
+    }>;
   };
 };
 
@@ -137,16 +149,43 @@ type ScenarioRun = {
 };
 
 export type RunnerSelection = {
+  profile: string;
+  channel: string | null;
+  channelDriver: "qa-channel" | "crabline" | "live";
+  evidenceMode: "full" | "slim";
   providerMode: "mock-openai" | "live-frontier";
   primaryModel: string;
   alternateModel: string;
   fastMode: boolean;
-  scenarioIds: string[];
+  runtimePair: ["openclaw", "codex"] | null;
+  runtimePairLane: "core" | "extended" | "soak" | null;
+  scenarioIds: string[] | null;
+};
+
+export type RunnerResolvedPlan = {
+  status: "ready" | "invalid";
+  profile: string;
+  explicitScenarioSelection: boolean;
+  selectedScenarios: Array<{
+    id: string;
+    title: string;
+    executionKind: "flow" | "playwright" | "script" | "vitest";
+    declaredChannel: string | null;
+    effectiveChannel: string | null;
+  }>;
+  executionKinds: Array<"flow" | "playwright" | "script" | "vitest">;
+  exclusions: Array<{
+    scenarioId: string;
+    executionKind: "flow" | "playwright" | "script" | "vitest";
+    reasons: string[];
+  }>;
+  errors: string[];
 };
 
 type RunnerSnapshot = {
   status: "idle" | "running" | "completed" | "failed";
   selection: RunnerSelection;
+  plan: RunnerResolvedPlan | null;
   startedAt?: string;
   finishedAt?: string;
   artifacts: null | {
@@ -370,6 +409,7 @@ export type UiState = {
   activeTab: TabId;
   runnerDraft: RunnerSelection | null;
   runnerDraftDirty: boolean;
+  runnerPlanOverride: RunnerResolvedPlan | null;
   composer: {
     conversationKind: "direct" | "channel";
     conversationId: string;
