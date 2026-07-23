@@ -17,7 +17,6 @@ import {
 import { emitCommittedSessionIdentityDiff } from "./session-accessor.sqlite-identity.js";
 import { loadSqliteTranscriptEventsFromDatabase } from "./session-accessor.sqlite-read.js";
 import {
-  formatSqliteSessionMarkerForScope,
   normalizeSqliteSessionKey,
   resolveSqliteScope,
   runExclusiveSqliteSessionWrite,
@@ -37,7 +36,6 @@ import type {
 import { buildSessionCreationStamp } from "./session-entry-provenance.js";
 import { inheritSessionSelection } from "./session-entry-selection.js";
 import { reconcileSessionTranscriptIndexInTransaction } from "./session-transcript-index.js";
-import { parseSqliteSessionFileMarker } from "./sqlite-marker.js";
 import { createSessionTranscriptHeader } from "./transcript-header.js";
 import {
   isSessionTranscriptLeafControl,
@@ -76,12 +74,6 @@ export async function listSqliteSessionBranches(
     const currentEntry = readSessionEntryRow(database, sourceKey)?.entry;
     if (!currentEntry?.sessionId) {
       return { status: "missing-session" };
-    }
-    if (
-      currentEntry.sessionFile?.trim() &&
-      !parseSqliteSessionFileMarker(currentEntry.sessionFile)
-    ) {
-      return { status: "unsupported-storage" };
     }
     const events = loadSqliteTranscriptEventsFromDatabase(database, currentEntry.sessionId);
     return { status: "ok", branches: summarizeSessionBranches(events) };
@@ -179,9 +171,6 @@ function mutateSqliteSessionAtMessageInTransaction(
   if (!currentEntry?.sessionId) {
     return { status: "missing-session" };
   }
-  if (currentEntry.sessionFile?.trim() && !parseSqliteSessionFileMarker(currentEntry.sessionFile)) {
-    return { status: "unsupported-storage" };
-  }
   const events = loadSqliteTranscriptEventsFromDatabase(database, currentEntry.sessionId);
   const cut = params.mode === "switch" ? undefined : resolveMessageCut(events, params.entryId);
   if (cut && "status" in cut) {
@@ -200,7 +189,6 @@ function mutateSqliteSessionAtMessageInTransaction(
     sessionId: nextSessionId,
     sessionKey: params.targetKey,
   };
-  const nextSessionFile = formatSqliteSessionMarkerForScope(targetScope);
   const header = createSessionTranscriptHeader({
     cwd: readTranscriptHeaderCwd(events),
     sessionId: nextSessionId,
@@ -238,7 +226,6 @@ function mutateSqliteSessionAtMessageInTransaction(
               entryId: params.entryId,
             }
           : undefined,
-      nextSessionFile,
       nextSessionId,
     }),
     ...(params.mode === "fork" && params.creation
@@ -380,7 +367,6 @@ function cloneMessageCutSessionEntry(params: {
   currentEntry: SessionEntry;
   forked: boolean;
   forkSource?: NonNullable<SessionEntry["forkSource"]>;
-  nextSessionFile: string;
   nextSessionId: string;
 }): SessionEntry {
   const baseEntry = params.forked
@@ -389,7 +375,6 @@ function cloneMessageCutSessionEntry(params: {
   return {
     ...baseEntry,
     sessionId: params.nextSessionId,
-    sessionFile: params.nextSessionFile,
     lifecycleRevision: params.forked ? randomUUID() : params.currentEntry.lifecycleRevision,
     updatedAt: Date.now(),
     systemSent: false,

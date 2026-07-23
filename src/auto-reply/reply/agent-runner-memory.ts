@@ -37,14 +37,11 @@ import {
   resolveSessionFilePathOptions,
   type SessionEntry,
 } from "../../config/sessions.js";
+import { parseSqliteSessionFileMarker } from "../../config/sessions/legacy-sqlite-marker.js";
 import {
   readTranscriptStatsSync,
   updateSessionEntry,
 } from "../../config/sessions/session-accessor.js";
-import {
-  formatSqliteSessionFileMarker,
-  parseSqliteSessionFileMarker,
-} from "../../config/sessions/sqlite-marker.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { readSessionMessagesAsync } from "../../gateway/session-utils.fs.js";
 import { logVerbose } from "../../globals.js";
@@ -420,23 +417,14 @@ function resolveSessionLogPath(
     const transcriptPath = normalizeOptionalString(
       (sessionEntry as (SessionEntry & { transcriptPath?: string }) | undefined)?.transcriptPath,
     );
-    const sessionFile = normalizeOptionalString(sessionEntry?.sessionFile) || transcriptPath;
+    const sessionFile = transcriptPath;
     if (parseSqliteSessionFileMarker(sessionFile)) {
       return sessionFile;
-    }
-    const agentId =
-      opts?.agentId ??
-      (sessionKey?.startsWith("agent:") ? resolveAgentIdFromSessionKey(sessionKey) : undefined);
-    if (!sessionFile && agentId && opts?.storePath) {
-      return formatSqliteSessionFileMarker({
-        agentId,
-        sessionId,
-        storePath: opts.storePath,
-      });
     }
     if (!sessionFile) {
       return undefined;
     }
+    const agentId = resolveAgentIdFromSessionKey(sessionKey);
     const pathOpts = resolveSessionFilePathOptions({
       agentId,
       storePath: opts?.storePath,
@@ -517,6 +505,24 @@ async function readSessionLogSnapshot(params: {
   includeByteSize: boolean;
   includeUsage: boolean;
 }): Promise<SessionLogSnapshot> {
+  const agentId = resolveAgentIdFromSessionKey(params.sessionKey);
+  if (params.sessionId && params.sessionKey && params.opts?.storePath && agentId) {
+    if (!params.includeByteSize) {
+      return {};
+    }
+    try {
+      return {
+        byteSize: readTranscriptStatsSync({
+          agentId,
+          sessionId: params.sessionId,
+          sessionKey: params.sessionKey,
+          storePath: params.opts.storePath,
+        }).sizeBytes,
+      };
+    } catch {
+      return {};
+    }
+  }
   const logPath = resolveSessionLogPath(
     params.sessionId,
     params.sessionEntry,
@@ -698,16 +704,11 @@ async function estimatePromptTokensFromSessionTranscript(params: {
         transcriptBytesTokens,
       };
     }
-    const messages = (await readSessionMessagesAsync(
-      sessionId,
-      params.storePath,
-      params.sessionEntry?.sessionFile,
-      {
-        mode: "recent",
-        maxMessages: 200,
-        maxBytes: 1024 * 1024,
-      },
-    )) as AgentMessage[];
+    const messages = (await readSessionMessagesAsync(sessionId, params.storePath, undefined, {
+      mode: "recent",
+      maxMessages: 200,
+      maxBytes: 1024 * 1024,
+    })) as AgentMessage[];
     const estimatedMessageTokens = (() => {
       if (messages.length === 0) {
         return undefined;
@@ -1042,7 +1043,6 @@ export async function runPreflightCompactionIfNeeded(params: {
       storePath: params.storePath,
       tokensAfter: result.result?.tokensAfter,
       newSessionId: result.result?.sessionId,
-      newSessionFile: result.result?.sessionFile,
     });
     await appendPostCompactionRefreshPrompt({
       cfg: params.cfg,
@@ -1054,16 +1054,14 @@ export async function runPreflightCompactionIfNeeded(params: {
       const previousSessionId = params.followupRun.run.sessionId;
       params.followupRun.run.sessionId = entry.sessionId;
       params.replyOperation.updateSessionId(entry.sessionId);
-      if (entry.sessionFile) {
-        params.followupRun.run.sessionFile = entry.sessionFile;
-      }
+      params.followupRun.run.sessionFile = params.sessionKey;
       const queueKey = params.followupRun.run.sessionKey ?? params.sessionKey;
       if (queueKey) {
         deps.refreshQueuedFollowupSession({
           key: queueKey,
           previousSessionId,
           nextSessionId: entry.sessionId,
-          nextSessionFile: entry.sessionFile,
+          nextSessionFile: params.sessionKey,
         });
       }
     }
@@ -1345,7 +1343,6 @@ export async function runMemoryFlushIfNeeded(params: {
     .filter(Boolean)
     .join("\n\n");
   let postCompactionSessionId: string | undefined;
-  let postCompactionSessionFile: string | undefined;
   try {
     const selection = resolveMemoryFlushModelFallbackOptions(
       params.followupRun.run,
@@ -1446,9 +1443,6 @@ export async function runMemoryFlushIfNeeded(params: {
         if (result.meta?.agentMeta?.sessionId) {
           postCompactionSessionId = result.meta.agentMeta.sessionId;
         }
-        if (result.meta?.agentMeta?.sessionFile) {
-          postCompactionSessionFile = result.meta.agentMeta.sessionFile;
-        }
         bootstrapPromptWarningSignaturesSeen = resolveBootstrapWarningSignaturesSeen(
           result.meta?.systemPromptReport,
         );
@@ -1468,23 +1462,19 @@ export async function runMemoryFlushIfNeeded(params: {
         sessionKey: params.sessionKey,
         storePath: params.storePath,
         newSessionId: postCompactionSessionId,
-        newSessionFile: postCompactionSessionFile,
       });
       const updatedEntry = params.sessionKey ? activeSessionStore?.[params.sessionKey] : undefined;
       if (updatedEntry) {
         activeSessionEntry = updatedEntry;
         params.followupRun.run.sessionId = updatedEntry.sessionId;
         params.replyOperation.updateSessionId(updatedEntry.sessionId);
-        if (updatedEntry.sessionFile) {
-          params.followupRun.run.sessionFile = updatedEntry.sessionFile;
-        }
         const queueKey = params.followupRun.run.sessionKey ?? params.sessionKey;
         if (queueKey) {
           memoryDeps.refreshQueuedFollowupSession({
             key: queueKey,
             previousSessionId,
             nextSessionId: updatedEntry.sessionId,
-            nextSessionFile: updatedEntry.sessionFile,
+            nextSessionFile: params.sessionKey,
           });
         }
       }
@@ -1513,9 +1503,7 @@ export async function runMemoryFlushIfNeeded(params: {
           activeSessionEntry = updatedEntry;
           params.followupRun.run.sessionId = updatedEntry.sessionId;
           params.replyOperation.updateSessionId(updatedEntry.sessionId);
-          if (updatedEntry.sessionFile) {
-            params.followupRun.run.sessionFile = updatedEntry.sessionFile;
-          }
+          params.followupRun.run.sessionFile = params.sessionKey;
         }
       } catch (err) {
         logVerbose(`failed to persist memory flush metadata: ${String(err)}`);
