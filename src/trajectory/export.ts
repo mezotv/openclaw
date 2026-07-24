@@ -1167,7 +1167,7 @@ export async function exportTrajectoryBundle(params: BuildTrajectoryBundleParams
     transcriptEventCount: transcriptEvents.length,
     sourceFiles: {
       session: maybeRedactPathString(
-        params.sessionFile ?? params.sessionTarget?.sessionKey ?? params.sessionId,
+        params.sessionTarget?.sessionKey ?? params.sessionFile ?? params.sessionId,
         redaction,
       ),
       runtime:
