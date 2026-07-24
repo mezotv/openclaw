@@ -1086,7 +1086,7 @@ describe("createFollowupRunner reply-lane admission", () => {
 
     const call = requireLastMockCallArg(runEmbeddedAgentMock, "run embedded agent");
     expect(call.sessionId).toBe("post-compact-session");
-    expect(call.sessionFile).toBe("/tmp/post-compact.jsonl");
+    expect(call.sessionFile).toBe("main");
   });
 
   it("marks only the delivery-dependent follow-up admission wait", async () => {
@@ -1169,7 +1169,7 @@ describe("createFollowupRunner reply-lane admission", () => {
 
     const call = requireLastMockCallArg(runEmbeddedAgentMock, "run embedded agent");
     expect(call.sessionId).toBe("rotated-session");
-    expect(call.sessionFile).toBe("/tmp/rotated.jsonl");
+    expect(call.sessionFile).toBe("main");
   });
 
   it("registers the admitted session id when the local session store is stale", async () => {
@@ -4381,9 +4381,7 @@ describe("createFollowupRunner compaction", () => {
     await runner(current);
 
     expect(queuedNext.run.sessionId).toBe("session-rotated");
-    expect(await normalizeComparablePath(queuedNext.run.sessionFile)).toBe(
-      await normalizeComparablePath(path.join(path.dirname(storePath), "session-rotated.jsonl")),
-    );
+    expect(queuedNext.run.sessionFile).toBe("main");
   });
 
   it("does not count failed compaction end events in followup runs", async () => {

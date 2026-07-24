@@ -106,6 +106,7 @@ export async function completeReplyAgentRun(input: {
   if (autoCompactionCount > 0) {
     const previousSessionId = activeSessionEntry?.sessionId ?? followupRun.run.sessionId;
     const count = await incrementRunCompactionCount({
+      agentId: followupRun.run.agentId,
       cfg,
       sessionEntry: activeSessionEntry,
       sessionStore: activeSessionStore,
