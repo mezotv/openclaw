@@ -1253,7 +1253,9 @@ async function compactEmbeddedAgentSessionDirectOnce(
         sessionKey: params.sessionKey,
       })) ??
       (await acquireSessionWriteLock({
+        // Direct compaction canonicalizes this field from runSessionTarget.sessionKey above.
         sessionFile: params.sessionFile,
+        targetKind: "session-key",
         ...resolveSessionWriteLockOptions(params.config, {
           maxHoldMsFallback: resolveSessionLockMaxHoldFromTimeout({
             timeoutMs: compactionTimeoutMs,
