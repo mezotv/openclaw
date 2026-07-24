@@ -521,6 +521,7 @@ async function appendPostCompactionRefreshPrompt(params: {
 }
 
 async function readSessionLogSnapshot(params: {
+  agentId?: string;
   sessionId?: string;
   sessionEntry?: SessionEntry;
   sessionKey?: string;
@@ -538,7 +539,7 @@ async function readSessionLogSnapshot(params: {
   if (logPath && !sqliteMarker) {
     return await readFileSessionLogSnapshot(logPath, params);
   }
-  const agentId = resolveAgentIdFromSessionKey(params.sessionKey);
+  const agentId = params.agentId ?? resolveAgentIdFromSessionKey(params.sessionKey);
   if (params.sessionId && params.sessionKey && params.opts?.storePath && agentId) {
     return readSqliteSessionLogSnapshot(
       {
@@ -685,6 +686,7 @@ async function estimatePromptTokensFromSessionTranscript(params: {
   }
   try {
     const snapshot = await readSessionLogSnapshot({
+      agentId: params.agentId,
       sessionId,
       sessionEntry: params.sessionEntry,
       sessionKey: params.sessionKey,
@@ -719,7 +721,7 @@ async function estimatePromptTokensFromSessionTranscript(params: {
     }
     const messages = (await readSessionMessagesAsync(
       {
-        agentId: resolveAgentIdFromSessionKey(params.sessionKey),
+        agentId: params.agentId ?? resolveAgentIdFromSessionKey(params.sessionKey),
         sessionId,
         sessionKey: params.sessionKey,
         storePath: params.storePath,
@@ -874,6 +876,7 @@ export async function runPreflightCompactionIfNeeded(params: {
   const transcriptSizeSnapshot =
     shouldCheckActiveTranscriptBytes && transcriptUsageTokens?.transcriptByteSize === undefined
       ? await readSessionLogSnapshot({
+          agentId: params.followupRun.run.agentId,
           sessionId: entry.sessionId,
           sessionEntry: entry,
           sessionKey: params.sessionKey ?? params.followupRun.run.sessionKey,
@@ -1058,6 +1061,7 @@ export async function runPreflightCompactionIfNeeded(params: {
     }
 
     await deps.incrementCompactionCount({
+      agentId: params.followupRun.run.agentId,
       cfg: params.cfg,
       sessionEntry: entry,
       sessionStore: params.sessionStore,
@@ -1478,6 +1482,7 @@ export async function runMemoryFlushIfNeeded(params: {
     if (memoryCompactionCompleted) {
       const previousSessionId = activeSessionEntry?.sessionId ?? params.followupRun.run.sessionId;
       await memoryDeps.incrementCompactionCount({
+        agentId: params.followupRun.run.agentId,
         cfg: params.cfg,
         sessionEntry: activeSessionEntry,
         sessionStore: activeSessionStore,

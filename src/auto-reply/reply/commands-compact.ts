@@ -302,6 +302,7 @@ export const handleCompactCommand: CommandHandler = async (params) => {
       : "Compaction failed";
   if (result.ok && result.compacted) {
     await runtime.incrementCompactionCount({
+      agentId: params.agentId,
       cfg: params.cfg,
       sessionEntry: targetSessionEntry,
       sessionStore: params.sessionStore,

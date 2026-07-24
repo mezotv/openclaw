@@ -7,6 +7,7 @@ import type { ApiRegistry } from "@openclaw/ai";
 import { isAcpRuntimeSpawnAvailable } from "../../acp/runtime/availability.js";
 import type { ThinkLevel } from "../../auto-reply/thinking.js";
 import { resolveAgentModelFallbackValues } from "../../config/model-input.js";
+import { formatSqliteSessionFileMarker } from "../../config/sessions/legacy-sqlite-marker.js";
 import type { SessionTranscriptRuntimeTarget } from "../../config/sessions/session-accessor.types.js";
 import { acquireOwnedSessionTranscriptWriteLock } from "../../config/sessions/transcript-write-context.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
@@ -1577,7 +1578,11 @@ async function compactEmbeddedAgentSessionDirectOnce(
           const messageCountAfter = session.messages.length;
           const compactedCount = Math.max(0, messageCountCompactionInput - messageCountAfter);
           const activeSessionId = params.sessionId;
-          const activeSessionFile = params.sessionFile;
+          // Public compaction hooks retain an identity-only compatibility marker.
+          const activeSessionFile = formatSqliteSessionFileMarker({
+            ...params.sessionTarget,
+            sessionId: activeSessionId,
+          });
           // Core SQLite compaction never used the retired file-rotation path.
           // Context engines may still return an explicit successor identity.
           const activePostLeafId = postCompactionLeafId;
