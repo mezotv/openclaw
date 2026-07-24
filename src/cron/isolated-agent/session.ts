@@ -184,6 +184,7 @@ export function resolveCronSession(params: {
           ...resolveSessionLifecycleTimestamps({
             entry,
             agentId: params.agentId,
+            sessionKey: params.sessionKey,
             storePath,
           }),
           now: params.nowMs,
@@ -236,6 +237,7 @@ export function resolveCronSession(params: {
         resolveSessionLifecycleTimestamps({
           entry,
           agentId: params.agentId,
+          sessionKey: params.sessionKey,
           storePath,
         }).sessionStartedAt),
     lastInteractionAt: isNewSession ? params.nowMs : baseEntry?.lastInteractionAt,

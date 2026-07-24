@@ -445,6 +445,7 @@ export function resolveSession(opts: {
             ...resolveSessionLifecycleTimestamps({
               entry: sessionEntry,
               agentId: sessionAgentId,
+              sessionKey,
               storePath,
             }),
             now,

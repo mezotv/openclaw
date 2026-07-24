@@ -76,6 +76,7 @@ export function resolveSessionEntryResetFreshness(
   const lifecycleTimestamps = resolveSessionLifecycleTimestamps({
     entry,
     agentId,
+    sessionKey: params.sessionKey,
     storePath,
   });
   const base = {

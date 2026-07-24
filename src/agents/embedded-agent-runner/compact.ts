@@ -1560,6 +1560,8 @@ async function compactEmbeddedAgentSessionDirectOnce(
               },
             },
           );
+          // The removed manual boundary hardener was file-only and already skipped
+          // canonical SQLite transcripts; the compactor's cut point remains authoritative.
           const effectiveFirstKeptEntryId = result.firstKeptEntryId;
           const postCompactionLeafId =
             typeof sessionManager.getLeafId === "function"
@@ -1576,6 +1578,8 @@ async function compactEmbeddedAgentSessionDirectOnce(
           const compactedCount = Math.max(0, messageCountCompactionInput - messageCountAfter);
           const activeSessionId = params.sessionId;
           const activeSessionFile = params.sessionFile;
+          // Core SQLite compaction never used the retired file-rotation path.
+          // Context engines may still return an explicit successor identity.
           const activePostLeafId = postCompactionLeafId;
           await runPostCompactionSideEffects({
             config: params.config,

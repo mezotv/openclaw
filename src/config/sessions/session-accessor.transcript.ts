@@ -9,6 +9,7 @@ import {
   loadSqliteTranscriptEventRowsAfterSeqSync,
   loadSqliteTranscriptEvents,
   loadSqliteTranscriptEventsSync,
+  loadSqliteTranscriptHeaderSync,
   loadSqliteTranscriptTailEventsSync,
   readSqliteTranscriptStatsSync,
   readSqliteTranscriptEventAtSeqSync,
@@ -106,6 +107,11 @@ export function replaceTranscriptEventsSync(
 /** Reads parsed transcript records synchronously from the SQLite transcript store. */
 export function loadTranscriptEventsSync(scope: SessionTranscriptReadScope): TranscriptEvent[] {
   return loadSqliteTranscriptEventsSync(scope);
+}
+
+/** Reads only the canonical transcript header row. */
+export function loadTranscriptHeaderSync(scope: SessionTranscriptReadScope): unknown {
+  return loadSqliteTranscriptHeaderSync(scope);
 }
 
 /** Loads a bounded newest transcript tail in storage order. */
