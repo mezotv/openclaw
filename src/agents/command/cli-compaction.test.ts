@@ -116,7 +116,7 @@ describe("runCliTurnCompactionLifecycle", () => {
     const sessionEntry: SessionEntry = {
       sessionId,
       updatedAt: Date.now(),
-      sessionFile,
+      sessionFile: sessionKey,
       contextTokens: 1_000,
       totalTokens: 950,
       totalTokensFresh: true,
@@ -201,7 +201,7 @@ describe("runCliTurnCompactionLifecycle", () => {
     expect(maintenanceCall?.reason).toBe("compaction");
     expect(maintenanceCall?.sessionId).toBe(sessionId);
     expect(maintenanceCall?.sessionKey).toBe(sessionKey);
-    expect(maintenanceCall?.sessionFile).toBe(sessionFile);
+    expect(maintenanceCall?.sessionFile).toBe(sessionKey);
     expect(updatedEntry?.compactionCount).toBe(1);
     // Once OpenClaw rewrites the transcript, external CLI resume ids are stale
     // and must be cleared so the next turn starts from the compacted prompt.
@@ -295,12 +295,11 @@ describe("runCliTurnCompactionLifecycle", () => {
     expect(maintenance).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: successorSessionId,
-        sessionFile: `sqlite:main:${successorSessionId}:${storePath}`,
+        sessionFile: sessionKey,
       }),
     );
     expect(recordCliCompactionInStore).toHaveBeenCalledWith(
       expect.objectContaining({
-        newSessionFile: `sqlite:main:${successorSessionId}:${storePath}`,
         newSessionId: successorSessionId,
         tokensAfter: 100,
       }),
@@ -317,7 +316,7 @@ describe("runCliTurnCompactionLifecycle", () => {
     const sessionEntry: SessionEntry = {
       sessionId,
       updatedAt: Date.now(),
-      sessionFile,
+      sessionFile: sessionKey,
       contextTokens: 1_000,
       totalTokens: 950,
       totalTokensFresh: true,
@@ -552,7 +551,7 @@ describe("runCliTurnCompactionLifecycle", () => {
     expect(compactAgentHarnessSessionCalls[0]?.[0]).toMatchObject({
       sessionId,
       sessionKey,
-      sessionFile,
+      sessionFile: sessionKey,
       provider: "openai",
       model: "gpt-5.5",
       contextTokenBudget: 1_000,
@@ -1082,7 +1081,6 @@ describe("runCliTurnCompactionLifecycle", () => {
         sessionKey,
         tokensAfter: 42,
         newSessionId: "session-codex-owned-engine-rotated",
-        newSessionFile: path.join(tmpDir, "session-codex-owned-engine-rotated.jsonl"),
       }),
     );
   });
@@ -1512,17 +1510,17 @@ describe("runCliTurnCompactionLifecycle", () => {
   it("initializes built-in context engines before resolving CLI compaction engine", async () => {
     const sessionKey = "agent:main:cli";
     const sessionId = "session-cli-init";
-    const sessionFile = path.join(tmpDir, "session-init.jsonl");
-    await writeSessionFile({ sessionFile, sessionId });
+    const storePath = path.join(tmpDir, "sessions-cli-init.json");
 
     const sessionEntry: SessionEntry = {
       sessionId,
       updatedAt: Date.now(),
-      sessionFile,
       contextTokens: 1_000,
       totalTokens: 950,
       totalTokensFresh: true,
     };
+    const sessionStore = { [sessionKey]: sessionEntry };
+    await persistSessionEntry({ sessionKey, storePath, entry: sessionEntry });
     const calls: string[] = [];
     setCliCompactionTestDeps({
       ensureContextEnginesInitialized: () => {
@@ -1554,6 +1552,8 @@ describe("runCliTurnCompactionLifecycle", () => {
       sessionId,
       sessionKey,
       sessionEntry,
+      sessionStore,
+      storePath,
       sessionAgentId: "main",
       workspaceDir: tmpDir,
       agentDir: tmpDir,

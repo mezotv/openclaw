@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import "../../test/helpers/session-manager-file-compat.js";
 import { expectDefined } from "@openclaw/normalization-core";
 import { Command } from "commander";
 import { SessionManager } from "openclaw/plugin-sdk/agent-sessions";

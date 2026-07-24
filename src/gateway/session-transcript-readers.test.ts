@@ -2,9 +2,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { formatSqliteSessionFileMarker } from "../config/sessions/legacy-sqlite-marker.js";
 import {
   persistSessionTranscriptTurn,
+  replaceTranscriptEvents,
   upsertSessionEntry,
 } from "../config/sessions/session-accessor.js";
 import { waitForSessionTranscriptIndexReconcile } from "../config/sessions/session-transcript-reconcile.js";
@@ -39,18 +39,22 @@ describe("session transcript reader facade", () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  function writeTranscript(sessionId: string, events: unknown[]): SessionTranscriptReadScope {
-    const transcriptPath = path.join(tempDir, `${sessionId}.jsonl`);
-    fs.writeFileSync(
-      transcriptPath,
-      `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
-      "utf-8",
-    );
-    return { sessionFile: transcriptPath, sessionId, sessionKey: `agent:main:${sessionId}` };
+  async function writeTranscript(
+    sessionId: string,
+    events: unknown[],
+  ): Promise<SessionTranscriptReadScope> {
+    const scope = {
+      agentId: "main",
+      sessionId,
+      sessionKey: `agent:main:${sessionId}`,
+      storePath,
+    };
+    await replaceTranscriptEvents(scope, events);
+    return scope;
   }
 
   test("reads active-branch messages and message ids through a scope", async () => {
-    const scope = writeTranscript("reader-active-branch", [
+    const scope = await writeTranscript("reader-active-branch", [
       { type: "session", version: 3, id: "reader-active-branch" },
       {
         type: "message",
@@ -97,7 +101,7 @@ describe("session transcript reader facade", () => {
 
   test("finds an anchored reset-archive message by historical session id", async () => {
     const sessionId = "reader-file-archive-anchor";
-    const scope = writeTranscript(sessionId, [
+    const scope = await writeTranscript(sessionId, [
       { type: "session", version: 3, id: sessionId },
       {
         type: "message",
@@ -235,7 +239,7 @@ describe("session transcript reader facade", () => {
     ]);
   });
 
-  test("uses SQLite marker identity when only sessionFile is provided", async () => {
+  test("uses structured SQLite identity", async () => {
     const sessionId = "reader-marker-only";
     const markerStorePath = path.join(
       tempDir,
@@ -259,21 +263,13 @@ describe("session transcript reader facade", () => {
       ],
       touchSessionEntry: false,
     });
-    const marker = formatSqliteSessionFileMarker({
-      agentId: "marker-agent",
-      sessionId,
-      storePath: markerStorePath,
-    });
-
     await expect(
-      readSessionMessagesAsync(
-        { sessionFile: marker, sessionId },
-        { mode: "full", reason: "sqlite marker-only read test" },
-      ),
+      readSessionMessagesAsync(writeScope, { mode: "full", reason: "sqlite identity read test" }),
     ).resolves.toMatchObject([{ content: "marker scoped prompt" }]);
-    await expect(
-      readSessionMessageByIdAsync({ sessionFile: marker, sessionId }, "marker-message"),
-    ).resolves.toMatchObject({ found: true, seq: 1 });
+    await expect(readSessionMessageByIdAsync(writeScope, "marker-message")).resolves.toMatchObject({
+      found: true,
+      seq: 1,
+    });
   });
 
   test("projects SQLite transcript reads to the active branch", async () => {
@@ -383,30 +379,5 @@ describe("session transcript reader facade", () => {
     await expect(
       readSessionMessagesAsync(scope, { mode: "full", reason: "facade agent scope test" }),
     ).resolves.toMatchObject([{ content: "agent scoped prompt" }]);
-  });
-
-  test("reads explicit transcript files without session store identity", async () => {
-    const sessionId = "reader-explicit-file";
-    const transcriptPath = path.join(tempDir, "explicit-file.jsonl");
-    fs.writeFileSync(
-      transcriptPath,
-      `${JSON.stringify({
-        type: "message",
-        id: "explicit-message",
-        parentId: null,
-        message: { role: "user", content: "explicit prompt" },
-      })}\n`,
-      "utf-8",
-    );
-    const scope = { sessionFile: transcriptPath, sessionId };
-
-    await expect(readSessionMessageCountAsync(scope)).resolves.toBe(1);
-    await expect(readSessionMessageByIdAsync(scope, "explicit-message")).resolves.toMatchObject({
-      found: true,
-      seq: 1,
-    });
-    await expect(
-      readSessionMessagesAsync(scope, { mode: "full", reason: "explicit file test" }),
-    ).resolves.toMatchObject([{ content: "explicit prompt" }]);
   });
 });
