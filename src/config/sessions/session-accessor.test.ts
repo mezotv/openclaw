@@ -3431,6 +3431,7 @@ describe("session accessor seam", () => {
     const explicitSessionFile = path.join(tempDir, "explicit-read-session.jsonl");
 
     const target = resolveSessionTranscriptReadTarget({
+      agentId: "main",
       sessionFile: explicitSessionFile,
       sessionId: "session-1",
     });
