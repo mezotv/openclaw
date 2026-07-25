@@ -37,6 +37,7 @@ import {
 import { buildSignalTransportHttpUrl } from "./transport-url.js";
 
 type SignalSetupMode = "local" | "existing-server";
+type SignalCliConfigLocation = "default" | "custom";
 type SignalPrepareParams = Parameters<NonNullable<ChannelSetupWizard["prepare"]>>[0];
 type SignalFinalizeParams = Parameters<NonNullable<ChannelSetupWizard["finalize"]>>[0];
 type SignalExistingTransport = Extract<
@@ -584,14 +585,25 @@ async function prepareManagedNativeSetup(
 
   const existingConfigPath =
     resolvedTransport.kind === "managed-native" ? resolvedTransport.configPath : undefined;
-  const configPathAnswer = normalizeOptionalString(
-    await params.prompter.text({
-      message: "signal-cli config directory (type `default` for the standard location)",
-      initialValue: existingConfigPath,
-      placeholder: "~/.local/share/signal-cli",
-    }),
-  );
-  const configPath = configPathAnswer?.toLowerCase() === "default" ? undefined : configPathAnswer;
+  const configLocation = await params.prompter.select<SignalCliConfigLocation>({
+    message: "Where should signal-cli store its configuration?",
+    options: [
+      { value: "default", label: "Use the default location" },
+      { value: "custom", label: "Choose a custom directory" },
+    ],
+    initialValue: existingConfigPath ? "custom" : "default",
+  });
+  const configPath =
+    configLocation === "custom"
+      ? normalizeOptionalString(
+          await params.prompter.text({
+            message: "signal-cli config directory",
+            initialValue: existingConfigPath,
+            placeholder: "~/.local/share/signal-cli",
+            validate: (value) => (normalizeOptionalString(value) ? undefined : "Required"),
+          }),
+        )
+      : undefined;
 
   // Validate account-owned port allocation now, while keeping the candidate ephemeral until probe.
   prepareSignalManagedNativeTransport({
