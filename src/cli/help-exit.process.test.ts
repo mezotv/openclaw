@@ -210,7 +210,9 @@ describe("JSON console style process output", () => {
     expect(failure?.stdout ?? "").toBe("");
     const records = parseJsonLines(failure?.stderr ?? "");
     expect(records.length).toBeGreaterThan(0);
-    const messages = records.map((record) => String(record.message ?? "")).join("\n");
+    const messages = records
+      .map((record) => (typeof record.message === "string" ? record.message : ""))
+      .join("\n");
     expect(messages).toContain("written by version 9999.1.1");
     expect(messages).toContain("Refusing to force-kill gateway port listeners");
   });
