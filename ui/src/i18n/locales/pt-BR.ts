@@ -598,6 +598,9 @@ export const pt_BR: TranslationMap = {
     worktreeName: "Nome do worktree",
     worktreeNamePlaceholder: "auto",
     worktreeNameInvalid: "Nomes de worktree usam letras minúsculas, dígitos e hifens.",
+    incognito: "Anônimo",
+    incognitoDescription: "Mantenha esta conversa apenas até o Gateway reiniciar",
+    startAsDraft: "Iniciar como rascunho",
     messagePlaceholder: "Em que esta sessão deve trabalhar?",
     readingAttachment: "Lendo anexo",
     start: "Iniciar sessão",
@@ -619,7 +622,8 @@ export const pt_BR: TranslationMap = {
     limit: "Limite",
     filters: "Filtros",
     createdBy: "Criado por {name}",
-    filterByCreator: "Filtrar por criador",
+    archivedBy: "Arquivado por {name}",
+    people: "Pessoas",
     allCreators: "Todas as pessoas",
     filterControls: "Filtros de sessão",
     sourceFilters: "Filtros de origem da sessão",
@@ -678,6 +682,8 @@ export const pt_BR: TranslationMap = {
     openWorkboardCard: "Abrir cartão do Workboard",
     dashboardAvailable: "Painel disponível",
     approvalNeeded: "Aprovação necessária",
+    queuedMessage: "{count} mensagem na fila para envio",
+    queuedMessages: "{count} mensagens na fila para envio",
     noSessions: "Nenhuma sessão encontrada.",
     noActiveSessions: "Nenhum thread ativo.",
     noArchivedSessions: "Nenhuma sessão arquivada.",
@@ -745,6 +751,7 @@ export const pt_BR: TranslationMap = {
     unread: "Unread",
     worktreeSession: "Worktree session",
     automationAttached: "Automation attached",
+    incognito: "Conversa anônima",
     cloudWorkerPlacement: "Worker na nuvem: {state}",
     cloudWorkerPlacementConflict: "Worker na nuvem: {state} · 1 conflito de workspace",
     cloudWorkerPlacementConflicts: "Worker na nuvem: {state} · {count} conflitos de workspace",
@@ -1015,7 +1022,9 @@ export const pt_BR: TranslationMap = {
   },
   configForm: {
     showAdvanced: "Mostrar avançado",
-    advancedCount: "Avançado ({count})",
+    advancedHidden: "{count} configuração avançada oculta",
+    advancedHiddenPlural: "{count} configurações avançadas ocultas",
+    advancedDivider: "Avançado",
     hideValue: "Ocultar valor",
     revealValue: "Revelar valor",
     disableStreamToReveal: "Desative o modo de streaming para revelar o valor",
@@ -1403,6 +1412,11 @@ export const pt_BR: TranslationMap = {
     chatPrefs: {
       title: "Chat",
       hint: "Preferências de chat locais do navegador.",
+      messageWidth: "Largura da mensagem",
+      messageWidthHint:
+        "Largura CSS opcional para a transcrição centralizada, como 960px, 82% ou min(1280px, 82%).",
+      messageWidthInvalid:
+        "Insira uma largura CSS como 960px, 82%, min(1280px, 82%) ou calc(100% - 2rem).",
     },
     sidebarPrefs: {
       title: "Barra lateral",
@@ -1468,8 +1482,11 @@ export const pt_BR: TranslationMap = {
     revealEnvValues: "Mostrar valores de env",
     peek: "Espiar",
     loadingSchema: "Carregando esquema…",
-    formUnsafe:
-      "Sua configuração contém campos que o editor de formulário não consegue representar com segurança. Use o modo Raw para editar essas entradas.",
+    formUnsafeCount: "1 configuração nesta config só pode ser editada como texto: {paths}",
+    formUnsafeCountPlural:
+      "{count} configurações nesta config só podem ser editadas como texto: {paths}",
+    formUnsafeMore: "+{count} mais",
+    openRawEditor: "Abrir editor Raw",
     rawConfig: "Configuração raw (JSON/JSON5)",
     secretCount: "{count} segredo",
     secretCountPlural: "{count} segredos",
@@ -1691,6 +1708,7 @@ export const pt_BR: TranslationMap = {
     blockedAgentFilter: "bloqueado pelo filtro de agente",
   },
   nav: {
+    account: "Conta",
     back: "Voltar",
     forward: "Avançar",
     chat: "Chat",
@@ -1922,6 +1940,15 @@ export const pt_BR: TranslationMap = {
       pair: "Emparelhar",
       more: "Mais opções de login",
     },
+    prepare: {
+      title: "Configurar um modelo local",
+      intro: "Baixe ou prepare um modelo local neste Gateway.",
+      button: "Configurar / Baixar modelo",
+      ollamaLabel: "Ollama",
+      ollamaHint: "Baixe um modelo com suporte a ferramentas do seu servidor Ollama",
+      llamaCppLabel: "Modelo local (llama.cpp)",
+      llamaCppHint: "Baixe um modelo local de aproximadamente 5,0 GB; requer 16 GB de RAM",
+    },
     manual: {
       title: "Conectar com uma chave de API ou token",
       provider: "Provedor",
@@ -1952,8 +1979,11 @@ export const pt_BR: TranslationMap = {
     },
     wizard: {
       dialogLabel: "Login no provedor",
+      prepareDialogLabel: "Configuração de modelo local",
       title: "Entrar com um provedor",
+      prepareTitle: "Configurar um modelo local",
       starting: "Iniciando o login no provedor…",
+      prepareStarting: "Iniciando a configuração do modelo local…",
       checking: "Verificando a configuração do seu modelo…",
       working: "Trabalhando…",
       continue: "Continuar",
@@ -2421,6 +2451,8 @@ export const pt_BR: TranslationMap = {
     toolRuns: "{count} execuções",
     identity: {
       title: "Identidade",
+      menuLabel: "Menu de identidade",
+      menuButtonLabel: "Menu de identidade e aplicativo para {name}",
       description: "Seu perfil neste gateway.",
       loading: "Carregando sua identidade…",
       profileUnavailable: "Não foi possível carregar seu perfil de identidade.",
@@ -3045,6 +3077,7 @@ export const pt_BR: TranslationMap = {
     eventStale: "Sessão obsoleta",
   },
   connection: {
+    queuedCount: "{count} na fila",
     reconnecting: "Reconectando…",
     retryNow: "Tentar novamente agora",
     access: {
@@ -3718,6 +3751,16 @@ export const pt_BR: TranslationMap = {
   },
   login: {
     subtitle: "Painel do Gateway",
+    deviceAuthMigration: {
+      banner: "Este navegador ainda precisa de aprovação única do dispositivo após a atualização.",
+      action: "Proteger este navegador",
+      secureContextRequired:
+        "Este navegador antigo permanece disponível temporariamente. Reabra-o em HTTPS ou localhost para protegê-lo com a identidade do dispositivo.",
+      pendingUnavailable:
+        "A solicitação de pareamento do navegador ainda não está disponível. Tente novamente em instantes.",
+      loadFailed: "Não foi possível carregar a solicitação de pareamento deste navegador: {error}",
+      approvalFailed: "Não foi possível proteger este navegador: {error}",
+    },
     passwordPlaceholder: "opcional",
     showToken: "Mostrar token",
     hideToken: "Ocultar token",
@@ -3817,6 +3860,9 @@ export const pt_BR: TranslationMap = {
   },
   chat: {
     disconnected: "Desconectado do gateway.",
+    sendErrors: {
+      activeLeafChanged: "O tópico mudou de ramificação — revise e reenvie.",
+    },
     waitingForApproval: "Aguardando aprovação…",
     startupStatus: {
       preparingWorkspace: "Preparando espaço de trabalho…",
@@ -3826,6 +3872,36 @@ export const pt_BR: TranslationMap = {
     },
     outputTokens: "{count} tokens de saída",
     archivedSessionDisabled: "Restaure esta sessão para enviar mensagens.",
+    sessionSharing: {
+      menu: "Compartilhamento de tópico",
+      current: "Visibilidade do tópico: {visibility}",
+      visibility: "Visibilidade",
+      shared: "Compartilhado",
+      readOnly: "Somente leitura",
+      suggest: "Sugerir",
+      draft: "Rascunho",
+      publishDraft: "Publicar rascunho",
+      members: "Membros",
+      selected: "Membro",
+      noPeople: "Nenhuma pessoa pareada encontrada.",
+      readOnlyNotice: "Apenas o proprietário da conversa e os membros podem agir nesta conversa.",
+    },
+    sessionSuggestions: {
+      suggest: "Sugerir",
+      suggestMessage: "Sugerir mensagem",
+      attachmentsUnsupported: "Remova os anexos antes de enviar uma sugestão de texto.",
+      sendNow: "Enviar a sugestão de {author} agora",
+      queue: "Enfileirar a sugestão de {author}",
+      edit: "Editar a sugestão de {author}",
+      dismiss: "Descartar a sugestão de {author}",
+      typing: "{name} está digitando…",
+      typingMany: "{names} estão digitando…",
+      state: {
+        pending: "Pendente",
+        accepted: "Aceita",
+        dismissed: "Descartada",
+      },
+    },
     loadOlder: "Carregar anteriores",
     sessionHeader: {
       renameTooltip: "Renomear sessão",
@@ -3839,6 +3915,7 @@ export const pt_BR: TranslationMap = {
       copyPath: "Copiar caminho",
       copyBranch: "Copiar nome do branch",
       copied: "Copiado",
+      incognito: "Conversa anônima",
       branches: "Ramificações do thread",
       branchSwitchUnavailable:
         "A troca de ramificação não está disponível enquanto o agente está trabalhando.",
@@ -4130,6 +4207,7 @@ export const pt_BR: TranslationMap = {
       openInCanvas: "Abrir no canvas",
       reply: "Responder",
       replyToMessage: "Responder à mensagem",
+      replyingTo: "Respondendo a {name}",
       rewind: "Retroceder",
       rewindConfirm: "Retroceder para antes desta mensagem?",
       rewindToHere: "Retroceder até aqui",
@@ -4228,6 +4306,8 @@ export const pt_BR: TranslationMap = {
       placeholderDisconnected: "Connect to the gateway to start chatting...",
       offlineHint:
         "Offline — as mensagens serão enfileiradas e enviadas quando a conexão retornar.",
+      offlineQueuedHint:
+        "Offline — {count} na fila; as mensagens são enviadas quando a conexão retornar.",
       preparingModel: "Preparando modelo...",
       responding: "{name} está respondendo...",
       sendingMessage: "Enviando mensagem...",
@@ -4416,7 +4496,8 @@ export const pt_BR: TranslationMap = {
       toolUseOne: "1 uso de ferramenta",
       toolUseMany: "{count} usos de ferramentas",
       expandTask: "Mostrar detalhes de {title}",
-      collapseTask: "Ocultar detalhes de {title}",
+      detailTitle: "Detalhes da tarefa",
+      backToTasks: "Voltar às tarefas em segundo plano",
       detailLoading: "Carregando detalhes da tarefa…",
       detailFailed: "Não foi possível carregar os detalhes da tarefa.",
       prompt: "Prompt",
