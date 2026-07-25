@@ -35,14 +35,13 @@ function renderTelegramQaInboundText(
   botUsername: string,
 ) {
   const commandName = input.nativeCommand?.name.trim().toLowerCase();
-  const commandToken = input.text.match(/^\S+/u)?.[0];
+  const renderedText = input.text.replaceAll("@openclaw", `@${botUsername}`);
+  const commandToken = renderedText.match(/^\S+/u)?.[0];
   // Scenarios declare command semantics once; the live adapter owns Telegram's
   // bot-username targeting while local drivers may encode the same metadata differently.
-  const targetedText =
-    commandName && commandToken?.toLowerCase() === `/${commandName}`
-      ? `/${commandName}@${botUsername}${input.text.slice(commandToken.length)}`
-      : input.text;
-  return targetedText.replaceAll("@openclaw", `@${botUsername}`);
+  return commandName && commandToken?.toLowerCase() === `/${commandName}`
+    ? `/${commandName}@${botUsername}${renderedText.slice(commandToken.length)}`
+    : renderedText;
 }
 
 export async function createTelegramQaTransportAdapter(
