@@ -274,8 +274,24 @@ function renderWizardStep(step: WizardStep): string {
     default:
       break;
   }
-  lines.push("Say `cancel` to stop this setup.");
   return lines.filter(Boolean).join("\n");
+}
+
+const WIZARD_CANCEL_HINT = "Say `cancel` to stop this setup.";
+
+/** Steps that block on the user; note/progress/gateway actions advance on their own. */
+function wizardStepAwaitsInput(step: WizardStep): boolean {
+  switch (step.type) {
+    case "select":
+    case "multiselect":
+    case "text":
+    case "confirm":
+      return true;
+    case "action":
+      return step.executor === "client";
+    default:
+      return false;
+  }
 }
 
 /** Map a chat reply to a wizard step answer; null means "could not parse". */
@@ -479,7 +495,15 @@ export class SystemAgentChatEngine {
     // Snapshot before resolving: wizard answers to sensitive steps (tokens,
     // passwords) must never enter the AI-visible history.
     const sensitiveTurn = this.wizardBridge?.step?.sensitive === true;
-    const reply = await this.resolveTurn(text);
+    const resolved = await this.resolveTurn(text);
+    // The hint belongs to the outgoing message, not to each rendered step: one
+    // turn can concatenate several auto-answered notes, and a wizard that just
+    // ended must not offer a cancel that can no longer happen.
+    const awaitedStep = this.wizardBridge?.step;
+    const reply: SystemAgentChatReply =
+      resolved.text && awaitedStep && wizardStepAwaitsInput(awaitedStep)
+        ? { ...resolved, text: `${resolved.text}\n${WIZARD_CANCEL_HINT}` }
+        : resolved;
     this.history.push({
       role: "user",
       text: sensitiveTurn ? "<redacted secret>" : redactSensitiveCommandText(text),
