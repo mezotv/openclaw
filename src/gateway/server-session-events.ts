@@ -170,7 +170,6 @@ async function handleTranscriptUpdateBroadcast(
     legacyMarker && !completeTarget
       ? listSessionEntries({
           agentId: legacyMarker.agentId,
-          readOnly: true,
           storePath: legacyMarker.storePath,
         }).filter(({ entry }) => entry.sessionId === legacyMarker.sessionId)
       : [];
