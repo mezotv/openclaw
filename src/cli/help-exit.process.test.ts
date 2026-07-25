@@ -103,6 +103,7 @@ function parseJsonLines(stdout: string): Array<Record<string, unknown>> {
 type CliProcessFailure = Error & {
   code?: number | string;
   stderr?: string;
+  stdout?: string;
 };
 
 async function runCliProcessExpectFailure(args: string[]): Promise<CliProcessFailure> {
@@ -189,5 +190,28 @@ describe("JSON console style process output", () => {
     expect(output).toHaveProperty("gateway");
     expect(output).not.toHaveProperty("level");
     expect(output).not.toHaveProperty("message");
+  });
+
+  it("structures gateway safety errors emitted before command routing", async () => {
+    let failure: CliProcessFailure | undefined;
+    try {
+      await runCliProcess({
+        args: ["gateway", "--force"],
+        config: {
+          ...loggingConfig,
+          meta: { lastTouchedVersion: "9999.1.1" },
+        },
+      });
+    } catch (error) {
+      failure = error as CliProcessFailure;
+    }
+
+    expect(failure?.code).toBe(1);
+    expect(failure?.stdout ?? "").toBe("");
+    const records = parseJsonLines(failure?.stderr ?? "");
+    expect(records.length).toBeGreaterThan(0);
+    const messages = records.map((record) => String(record.message ?? "")).join("\n");
+    expect(messages).toContain("written by version 9999.1.1");
+    expect(messages).toContain("Refusing to force-kill gateway port listeners");
   });
 });

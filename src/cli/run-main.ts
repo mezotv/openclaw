@@ -1007,6 +1007,12 @@ export async function runCli(argv: string[] = process.argv) {
       }
     });
   }
+  // Console formatting is a process-wide invariant. Install capture after CLI
+  // dotenv loading but before config reads and command execution can diverge.
+  if (!isHelpOrVersionInvocation) {
+    const { enableConsoleCapture } = await loadLoggingModule();
+    enableConsoleCapture();
+  }
   if (!isHelpOrVersionInvocation && isGatewayRunInvocation) {
     await startupTrace.measure("gateway-run-select-environment", async () => {
       const [{ selectGatewayRunEnvironment }, { defaultRuntime }] = await Promise.all([
@@ -1225,11 +1231,6 @@ export async function runCli(argv: string[] = process.argv) {
         return;
       }
     }
-
-    // Console formatting is a process-wide invariant. Install capture before
-    // gateway fast paths, routed commands, and Commander can diverge.
-    const { enableConsoleCapture } = await loadLoggingModule();
-    enableConsoleCapture();
 
     const shouldUseCliEnvProxy =
       !isHelpOrVersionInvocation && shouldStartProxyForCli(normalizedArgv);
