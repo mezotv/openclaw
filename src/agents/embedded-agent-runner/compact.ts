@@ -385,9 +385,9 @@ export async function compactEmbeddedAgentSessionDirect(
   const runSessionTarget = await resolveAgentRunSessionTarget(paramsBase);
   const requestedParams: CompactEmbeddedAgentSessionParamsWithSessionFile = {
     ...paramsBase,
-    agentId: paramsBase.agentId ?? runSessionTarget.agentId,
+    agentId: runSessionTarget.agentId,
     sessionId: runSessionTarget.sessionId,
-    sessionKey: paramsBase.sessionKey ?? runSessionTarget.sessionKey,
+    sessionKey: runSessionTarget.sessionKey,
     sessionTarget: runSessionTarget,
     sessionFile: runSessionTarget.sessionKey,
   };
