@@ -11,6 +11,7 @@ import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coerci
 import { parseSqliteSessionFileMarker } from "../config/sessions/sqlite-marker.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createFileLockManager } from "../infra/file-lock-manager.js";
+import { acquireFsSafeFileLock } from "../infra/file-lock.js";
 import { isGatewayArgv } from "../infra/gateway-process-argv.js";
 import { readGatewayProcessArgsSync as readProcessArgsSync } from "../infra/gateway-processes.js";
 import { getProcessStartTime, isPidAlive } from "../shared/pid-alive.js";
@@ -406,6 +407,14 @@ function parseLockPayload(raw: string): LockFilePayload | null {
   return payload;
 }
 
+function parseLockPayloadOrNull(raw: string): LockFilePayload | null {
+  try {
+    return parseLockPayload(raw);
+  } catch {
+    return null;
+  }
+}
+
 async function readLockPayload(lockPath: string): Promise<LockFilePayload | null> {
   try {
     const raw = await fs.readFile(lockPath, "utf8");
@@ -704,6 +713,52 @@ async function shouldRemoveLockDuringCleanup(
   return await shouldRemoveContendedLockFile(lockPath, details, staleMs, nowMs);
 }
 
+async function reclaimSessionLockIfUnchanged(params: {
+  lockPath: string;
+  staleMs: number;
+  nowMs: number;
+  readOwnerProcessArgs: SessionLockOwnerProcessArgsReader;
+}): Promise<boolean> {
+  const shouldReclaim = async (payload: LockFilePayload | null) => {
+    const inspected = inspectLockPayloadForSession({
+      payload,
+      staleMs: params.staleMs,
+      nowMs: params.nowMs,
+      heldByThisProcess: false,
+      reclaimLockWithoutStarttime: false,
+      readOwnerProcessArgs: params.readOwnerProcessArgs,
+    });
+    return await shouldRemoveLockDuringCleanup(
+      params.lockPath,
+      inspected,
+      params.staleMs,
+      params.nowMs,
+    );
+  };
+  try {
+    const lock = await acquireFsSafeFileLock(params.lockPath, {
+      managerKey: "openclaw.session-write-lock-sweep",
+      lockPath: params.lockPath,
+      staleMs: params.staleMs,
+      timeoutMs: 0,
+      retry: { retries: 0 },
+      staleRecovery: "remove-if-unchanged",
+      payload: () => ({ pid: process.pid, createdAt: new Date().toISOString() }),
+      parsePayload: parseLockPayloadOrNull,
+      shouldReclaim: ({ payload }) => shouldReclaim(payload as LockFilePayload | null),
+      shouldRemoveStaleLock: ({ payload }) => shouldReclaim(payload as LockFilePayload | null),
+    });
+    await lock.release();
+    return true;
+  } catch (error) {
+    const code = (error as { code?: unknown }).code;
+    if (code === "file_lock_timeout" || code === "file_lock_stale") {
+      return false;
+    }
+    throw error;
+  }
+}
+
 function sessionLockHeldByThisProcess(normalizedSessionFile: string): boolean {
   return SESSION_LOCKS.heldEntries().some(
     (entry) => entry.normalizedTargetPath === normalizedSessionFile,
@@ -876,12 +931,18 @@ export async function cleanStaleLockFiles(params: {
     };
 
     if (removeStale && removable) {
-      await fs.rm(lockPath, { force: true });
-      lockInfo.removed = true;
-      cleaned.push(lockInfo);
-      params.log?.warn?.(
-        `removed stale session lock: ${lockPath} (${lockInfo.staleReasons.join(", ") || "unknown"})`,
-      );
+      lockInfo.removed = await reclaimSessionLockIfUnchanged({
+        lockPath,
+        staleMs,
+        nowMs,
+        readOwnerProcessArgs: ownerProcessArgsReader,
+      });
+      if (lockInfo.removed) {
+        cleaned.push(lockInfo);
+        params.log?.warn?.(
+          `removed stale session lock: ${lockPath} (${lockInfo.staleReasons.join(", ") || "unknown"})`,
+        );
+      }
     }
 
     locks.push(lockInfo);
