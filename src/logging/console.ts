@@ -5,6 +5,7 @@ import type { OpenClawConfig } from "../config/types.js";
 import { isVerbose } from "../global-state.js";
 import { readLoggingConfig, shouldSkipMutatingLoggingConfigRead } from "./config.js";
 import { resolveEnvLogLevelOverride } from "./env-log-level.js";
+import { formatJsonConsoleLine } from "./json-console-line.js";
 import { type LogLevel, normalizeLogLevel } from "./levels.js";
 import { getLogger } from "./logger.js";
 import { redactSensitiveText } from "./redact.js";
@@ -13,6 +14,7 @@ import { formatTimestamp } from "./timestamps.js";
 import type { ConsoleStyle, LoggerSettings } from "./types.js";
 
 export type { ConsoleStyle } from "./types.js";
+export { formatJsonConsoleLine };
 type ConsoleSettings = {
   level: LogLevel;
   style: ConsoleStyle;
@@ -183,23 +185,6 @@ export function formatConsoleTimestamp(style: ConsoleStyle): string {
     return formatTimestamp(now, { style: "short" }).replace(/[+-]\d{2}:\d{2}$/, "");
   }
   return formatTimestamp(now, { style: "long" });
-}
-
-export function formatJsonConsoleLine(params: {
-  level: LogLevel;
-  message: string;
-  subsystem?: string;
-  meta?: Record<string, unknown>;
-}): string {
-  return redactSensitiveText(
-    JSON.stringify({
-      time: formatConsoleTimestamp("json"),
-      level: params.level,
-      ...(params.subsystem ? { subsystem: params.subsystem } : {}),
-      message: params.message,
-      ...params.meta,
-    }),
-  );
 }
 
 function captureConsoleTraceStack(message: string, caller: (...args: unknown[]) => void): string {

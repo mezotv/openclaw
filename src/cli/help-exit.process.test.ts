@@ -197,6 +197,24 @@ describe("JSON console style process output", () => {
     expect(output).not.toHaveProperty("message");
   });
 
+  it("structures invalid log-level environment warnings", async () => {
+    const result = await runCliProcess({
+      args: ["status", "--timeout", "1000"],
+      config: loggingConfig,
+      env: { OPENCLAW_LOG_LEVEL: "bogus" },
+    });
+
+    const records = [...parseJsonLines(result.stdout), ...parseJsonLines(result.stderr)];
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          level: "warn",
+          message: expect.stringContaining('Ignoring invalid OPENCLAW_LOG_LEVEL="bogus"'),
+        }),
+      ]),
+    );
+  });
+
   it("structures gateway safety errors emitted before command routing", async () => {
     let failure: CliProcessFailure | undefined;
     try {
