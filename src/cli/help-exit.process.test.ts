@@ -240,4 +240,29 @@ describe("JSON console style process output", () => {
     expect(messages).toContain("Refusing to force-kill gateway port listeners");
     expect(messages).not.toContain("tslog: minLevel");
   });
+
+  it("structures container dispatch errors emitted before command routing", async () => {
+    let failure: CliProcessFailure | undefined;
+    try {
+      await runCliProcess({
+        args: ["--container", "openclaw-json-console-missing", "status"],
+        config: loggingConfig,
+      });
+    } catch (error) {
+      failure = error as CliProcessFailure;
+    }
+
+    expect(failure?.code).toBe(1);
+    expect(failure?.stdout ?? "").toBe("");
+    const records = parseJsonLines(failure?.stderr ?? "");
+    expect(records.length).toBeGreaterThan(0);
+    expect(records).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          level: "error",
+          message: expect.stringContaining("No running container matched"),
+        }),
+      ]),
+    );
+  });
 });

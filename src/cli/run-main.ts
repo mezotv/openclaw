@@ -963,6 +963,13 @@ async function bootstrapCliProxyCaptureAndDispatcher(
 export async function runCli(argv: string[] = process.argv) {
   const originalArgv = normalizeWindowsArgv(argv);
   const startupTrace = createGatewayStartupTrace(originalArgv, "cli.main");
+  const originalInvocation = resolveCliArgvInvocation(originalArgv);
+  // Console formatting is a process-wide invariant. Install capture before
+  // container dispatch, argument validation, and command routing can diverge.
+  if (!originalInvocation.hasHelpOrVersion) {
+    const { enableConsoleCapture } = await loadLoggingModule();
+    enableConsoleCapture();
+  }
   const parsedContainer = parseCliContainerArgs(originalArgv);
   if (!parsedContainer.ok) {
     throw new Error(parsedContainer.error);
@@ -1006,12 +1013,6 @@ export async function runCli(argv: string[] = process.argv) {
         loadCliDotEnv({ loadGlobalEnv: !isGatewayRunInvocation, quiet: true });
       }
     });
-  }
-  // Console formatting is a process-wide invariant. Install capture after CLI
-  // dotenv loading but before config reads and command execution can diverge.
-  if (!isHelpOrVersionInvocation) {
-    const { enableConsoleCapture } = await loadLoggingModule();
-    enableConsoleCapture();
   }
   if (!isHelpOrVersionInvocation && isGatewayRunInvocation) {
     await startupTrace.measure("gateway-run-select-environment", async () => {

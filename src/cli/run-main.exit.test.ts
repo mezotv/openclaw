@@ -3743,6 +3743,11 @@ describe("runCli exit behavior", () => {
       "demo",
       "status",
     ]);
+    expect(enableConsoleCaptureMock).toHaveBeenCalledTimes(1);
+    const captureOrder = enableConsoleCaptureMock.mock.invocationCallOrder[0] ?? 0;
+    const containerOrder = maybeRunCliInContainerMock.mock.invocationCallOrder[0] ?? 0;
+    expect(captureOrder).toBeGreaterThan(0);
+    expect(containerOrder).toBeGreaterThan(captureOrder);
     expect(loadDotEnvMock).not.toHaveBeenCalled();
     expect(tryRouteCliMock).not.toHaveBeenCalled();
     expect(closeActiveMemorySearchManagersMock).not.toHaveBeenCalled();
