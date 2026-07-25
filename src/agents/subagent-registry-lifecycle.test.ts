@@ -2906,6 +2906,7 @@ describe("subagent registry lifecycle hardening", () => {
 
     expect(captureSubagentCompletionReply).toHaveBeenCalledWith(entry.childSessionKey, {
       waitForReply: false,
+      sessionFile: entry.childSessionKey,
       outcome: {
         status: "ok",
         startedAt: 2_000,
