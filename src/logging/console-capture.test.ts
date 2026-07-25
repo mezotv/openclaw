@@ -127,7 +127,7 @@ describe("enableConsoleCapture", () => {
   });
 
   it("wraps console passthrough output when console style is JSON", () => {
-    setLoggerOverride({ level: "info", consoleLevel: "info", consoleStyle: "json" });
+    setLoggerOverride({ level: "silent", consoleLevel: "info", consoleStyle: "json" });
     const warn = vi.fn();
     console.warn = warn;
     enableConsoleCapture();

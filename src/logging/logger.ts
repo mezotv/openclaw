@@ -582,16 +582,18 @@ export function isFileLogLevelEnabled(level: LogLevel): boolean {
 }
 
 function buildLogger(settings: ResolvedRuntimeSettings): TsLogger<LogObj> {
+  const silent = settings.level === "silent";
   const logger = new TsLogger<LogObj>({
     name: "openclaw",
     maskValuesOfKeys: [],
-    minLevel: levelToMinLevel(settings.level),
+    // tslog rejects Infinity even though it represents our silent threshold.
+    // A hidden logger with no transports is silent at every level.
+    minLevel: levelToMinLevel(silent ? "fatal" : settings.level),
     type: "hidden", // no ansi formatting
   });
 
-  // Silent logging does not write files; skip all filesystem setup in this path.
-  if (settings.level === "silent") {
-    attachDiagnosticEventTransport(logger);
+  // Silent logging has no file or diagnostic transports.
+  if (silent) {
     return logger;
   }
 

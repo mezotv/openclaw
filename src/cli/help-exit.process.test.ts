@@ -155,7 +155,7 @@ describe("JSON console style process output", () => {
     logging: {
       consoleLevel: "info",
       consoleStyle: "json",
-      level: "info",
+      level: "silent",
     },
   };
 
@@ -175,6 +175,11 @@ describe("JSON console style process output", () => {
     expect([...stdoutRecords, ...stderrRecords]).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ level: "info", message: "OpenClaw status" }),
+      ]),
+    );
+    expect([...stdoutRecords, ...stderrRecords]).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ message: expect.stringContaining("tslog: minLevel") }),
       ]),
     );
   });
@@ -215,5 +220,6 @@ describe("JSON console style process output", () => {
       .join("\n");
     expect(messages).toContain("written by version 9999.1.1");
     expect(messages).toContain("Refusing to force-kill gateway port listeners");
+    expect(messages).not.toContain("tslog: minLevel");
   });
 });
