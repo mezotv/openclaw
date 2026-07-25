@@ -187,7 +187,6 @@ async function handleTranscriptUpdateBroadcast(
   }
   if (
     legacyMarker &&
-    update.target &&
     !completeTarget &&
     ((targetAgentId && targetAgentId !== legacyMarker.agentId) ||
       (targetSessionId &&
@@ -242,8 +241,8 @@ async function handleTranscriptUpdateBroadcast(
       : loadSessionEntryReadOnly(sessionKey, { agentId: visibleAgentId });
     const entry = fallbackTarget?.entry;
     const messageSessionId =
-      normalizeOptionalString(update.target?.sessionId) ??
       compatibleLegacyMarker?.sessionId ??
+      normalizeOptionalString(update.target?.sessionId) ??
       entry?.sessionId;
     const storePath = updateStorePath ?? fallbackTarget?.storePath;
     messageSeq = messageSessionId
