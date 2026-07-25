@@ -586,14 +586,16 @@ function buildLogger(settings: ResolvedRuntimeSettings): TsLogger<LogObj> {
   const logger = new TsLogger<LogObj>({
     name: "openclaw",
     maskValuesOfKeys: [],
-    // tslog rejects Infinity even though it represents our silent threshold.
-    // A hidden logger with no transports is silent at every level.
+    // tslog rejects Infinity during construction even though its runtime filter supports it.
     minLevel: levelToMinLevel(silent ? "fatal" : settings.level),
     type: "hidden", // no ansi formatting
   });
 
-  // Silent logging has no file or diagnostic transports.
+  // Restore the silent threshold after constructor validation. Keep the diagnostic transport
+  // attached exactly as before; tslog filters every level before transport dispatch.
   if (silent) {
+    logger.settings.minLevel = levelToMinLevel("silent");
+    attachDiagnosticEventTransport(logger);
     return logger;
   }
 
