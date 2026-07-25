@@ -114,6 +114,20 @@ describe("Telegram QA transport adapter", () => {
         text: "@sut_bot reply exactly: QA-MARKER",
       }),
     );
+    await adapter.sendInbound?.({
+      conversation: { id: "logical-room", kind: "group" },
+      senderId: "driver",
+      text: "/status",
+      nativeCommand: { name: "status" },
+    });
+    expect(mocks.callTelegramApi).toHaveBeenCalledWith(
+      "placeholder",
+      "sendMessage",
+      expect.objectContaining({
+        chat_id: "-100123",
+        text: "/status@sut_bot",
+      }),
+    );
 
     pollResolvers[0]?.([
       {
