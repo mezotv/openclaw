@@ -19,10 +19,10 @@ const QA_SMOKE_CI_SCENARIO_IDS = new Set([
   "group-visible-reply-tool",
   "long-running-release-audit",
   "matrix-restart-resume",
+  "native-command-session-target",
   "personal-task-followthrough-status",
   "plugin-lifecycle-hot-reload",
   "subagent-completion-direct-fallback",
-  "telegram-commands-command",
 ]);
 
 type QaSmokeCiPartId = (typeof QA_SMOKE_CI_PARTS)[number];
