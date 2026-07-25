@@ -881,13 +881,14 @@ describe("signalSetupWizard", () => {
     expect(mocks.spawnSignalDaemon).not.toHaveBeenCalled();
   });
 
-  it("clears a configured signal-cli directory when the user chooses the default", async () => {
+  it("accepts the explicit default answer for the signal-cli directory", async () => {
+    mocks.detectBinary.mockResolvedValueOnce(true);
     mocks.probeSignalTransport
       .mockResolvedValueOnce({ ok: false, error: "not running" })
       .mockResolvedValueOnce({ ok: true, status: 200 });
     const queued = createQueuedWizardPrompter({
       selectValues: ["local"],
-      textValues: [""],
+      textValues: ["default"],
     });
     const cfg = {
       channels: {
@@ -923,6 +924,11 @@ describe("signalSetupWizard", () => {
     });
 
     expect(prepared?.credentialValues).toMatchObject({ signalCliConfigPath: "" });
+    expect(queued.text).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "signal-cli config directory (type `default` for the standard location)",
+      }),
+    );
     expect(mocks.prepareSignalManagedNativeTransport).toHaveBeenLastCalledWith({
       cfg,
       accountId: "work",

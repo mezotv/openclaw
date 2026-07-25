@@ -584,13 +584,14 @@ async function prepareManagedNativeSetup(
 
   const existingConfigPath =
     resolvedTransport.kind === "managed-native" ? resolvedTransport.configPath : undefined;
-  const configPath = normalizeOptionalString(
+  const configPathAnswer = normalizeOptionalString(
     await params.prompter.text({
-      message: "signal-cli config directory (leave blank for default)",
+      message: "signal-cli config directory (type `default` for the standard location)",
       initialValue: existingConfigPath,
       placeholder: "~/.local/share/signal-cli",
     }),
   );
+  const configPath = configPathAnswer?.toLowerCase() === "default" ? undefined : configPathAnswer;
 
   // Validate account-owned port allocation now, while keeping the candidate ephemeral until probe.
   prepareSignalManagedNativeTransport({
