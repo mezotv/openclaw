@@ -24,6 +24,7 @@ scenario:
     - extensions/qa-lab/src/suite-runtime-agent-tools.ts
   execution:
     kind: flow
+    profiles: { "qa:smoke-ci": 10 }
     summary: Disable and re-enable a workspace skill through config.patch and verify the capability is not stale.
     config:
       skillName: qa-lifecycle-hot-reload-skill

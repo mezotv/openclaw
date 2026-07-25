@@ -27,6 +27,7 @@ scenario:
   execution:
     kind: flow
     channel: telegram
+    profiles: { "qa:smoke-ci": 8 }
     suiteIsolation: isolated
     isolationReason: Waits for the one active routed session before interrupting it with a provider-native command.
     summary: Start a real delayed channel turn, abort it through native `/stop`, then prove the conversation is unblocked.

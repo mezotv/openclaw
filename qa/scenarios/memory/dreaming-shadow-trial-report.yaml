@@ -29,6 +29,7 @@ scenario:
     - extensions/qa-lab/src/providers/mock-openai/server.ts
   execution:
     kind: flow
+    profiles: { "qa:smoke-ci": 2 }
     summary: Verify a report-only dreaming shadow trial compares candidate memory utility before promotion.
     config:
       sessionKey: agent:qa:dreaming-shadow-trial

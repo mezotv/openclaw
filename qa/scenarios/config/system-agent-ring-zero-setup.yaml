@@ -26,6 +26,7 @@ scenario:
     - test/e2e/qa-lab/runtime/system-agent-first-run-docker-client.ts
   execution:
     kind: script
+    profiles: { "qa:smoke-ci": 1 }
     path: test/e2e/qa-lab/runtime/docker-e2e-lane.ts
     summary: Redirects to the packaged inference-gate and typed-operation Docker lane; coverage remains secondary until a real interactive agent/tool/approval flow is exercised.
     args:

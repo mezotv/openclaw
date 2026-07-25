@@ -18,6 +18,7 @@ scenario:
   execution:
     kind: flow
     channel: matrix
+    profiles: { "qa:smoke-ci": 7 }
     suiteIsolation: isolated
     summary: Exercise normalized restart and continuation delivery.
     config:

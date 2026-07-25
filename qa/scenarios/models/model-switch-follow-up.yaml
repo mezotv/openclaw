@@ -20,6 +20,7 @@ scenario:
     - extensions/qa-lab/src/report.ts
   execution:
     kind: flow
+    profiles: { "qa:smoke-ci": 4 }
     summary: Verify the agent can switch to a different configured model and continue coherently.
     config:
       initialPrompt: "Say hello from the default configured model."

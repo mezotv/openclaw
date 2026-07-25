@@ -26,6 +26,7 @@ scenario:
     - extensions/qa-lab/src/providers/mock-openai/server.ts
   execution:
     kind: flow
+    profiles: { "qa:smoke-ci": 11 }
     summary: Reproduce yielded-parent subagent completion delivery and require frozen-result fallback to the QA DM.
     config:
       prompt: "Subagent direct fallback QA check: spawn one native subagent worker. The worker must finish with exactly QA-SUBAGENT-DIRECT-FALLBACK-OK. After spawning it, call sessions_yield and wait for the completion event. Do not use ACP."

@@ -29,6 +29,7 @@ scenario:
     - extensions/qa-lab/src/suite-runtime-agent-process.ts
   execution:
     kind: flow
+    profiles: { "qa:smoke-ci": 9 }
     summary: Verify personal task followthrough uses proof-backed status reporting instead of fake completion.
     config:
       sessionKey: agent:qa:personal-task-followthrough

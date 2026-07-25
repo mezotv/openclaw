@@ -23,6 +23,7 @@ scenario:
     - extensions/qa-lab/src/scenario-flow-runner.ts
   execution:
     kind: flow
+    profiles: { "qa:smoke-ci": 6 }
     summary: Verify sustained repo-style auditing with scattered evidence and artifact verification.
     config:
       reportFile: audit-fixture/release-audit.json
