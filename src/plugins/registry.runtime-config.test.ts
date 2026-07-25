@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { formatSqliteSessionFileMarker } from "../config/sessions/legacy-sqlite-marker.js";
+import type { SessionEntry } from "../config/sessions/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { resolveUserPath } from "../utils.js";
 import { createPluginRecord } from "./loader-records.js";
@@ -439,6 +440,7 @@ describe("plugin registry runtime config scope", () => {
       [lockedOrdinaryKey]: lockedOrdinaryEntry,
       [legacyPrefixedKey]: legacyPrefixedEntry,
     };
+    const typedEntries = entries as unknown as Record<string, SessionEntry>;
     const subagent = {
       run: vi.fn(async () => ({ runId: "subagent-run" })),
       waitForRun: vi.fn(async () => ({ status: "ok" as const })),
@@ -447,12 +449,12 @@ describe("plugin registry runtime config scope", () => {
     } satisfies PluginRuntime["subagent"];
     const runtime = createPluginRuntime({ subagent });
     const session = runtime.agent.session;
-    session.getSessionEntry = vi.fn((params) => entries[params.sessionKey as keyof typeof entries]);
+    session.getSessionEntry = vi.fn((params) => typedEntries[params.sessionKey]);
     session.listSessionEntries = vi.fn(() =>
-      Object.entries(entries).map(([sessionKey, entry]) => ({ sessionKey, entry })),
+      Object.entries(typedEntries).map(([sessionKey, entry]) => ({ sessionKey, entry })),
     );
     session.patchSessionEntry = vi.fn(async (params) => {
-      const entry = entries[params.sessionKey as keyof typeof entries];
+      const entry = typedEntries[params.sessionKey];
       if (!entry) {
         return null;
       }
@@ -462,9 +464,7 @@ describe("plugin registry runtime config scope", () => {
       return patch ? { ...entry, ...patch } : entry;
     });
     session.upsertSessionEntry = vi.fn(async () => {});
-    session.updateSessionStoreEntry = vi.fn(
-      async (params) => entries[params.sessionKey as keyof typeof entries],
-    );
+    session.updateSessionStoreEntry = vi.fn(async (params) => typedEntries[params.sessionKey]);
     let admissionScope = getPluginRuntimeGatewayRequestScope();
     session.runWithWorkAdmission = vi.fn(async (_params, run) => {
       admissionScope = getPluginRuntimeGatewayRequestScope();
@@ -597,7 +597,7 @@ describe("plugin registry runtime config scope", () => {
       otherApi.runtime.agent.runEmbeddedAgent({
         ...runParams,
         sessionKey: undefined,
-      }),
+      } as never),
     ).rejects.toThrow('owned by plugin "codex-owner"');
     await expect(
       otherApi.runtime.agent.runEmbeddedAgent({
@@ -609,7 +609,7 @@ describe("plugin registry runtime config scope", () => {
           sessionId: reservedEntry.sessionId,
           storePath: "/tmp/sessions.json",
         }),
-      }),
+      } as never),
     ).rejects.toThrow('owned by plugin "codex-owner"');
     await expect(
       otherApi.runtime.agent.runEmbeddedAgent({
@@ -617,7 +617,7 @@ describe("plugin registry runtime config scope", () => {
         sessionId: undefined,
         sessionKey: undefined,
         sessionFile: ordinaryAliasKey,
-      }),
+      } as never),
     ).rejects.toThrow('owned by plugin "codex-owner"');
     await expect(
       otherApi.runtime.agent.runEmbeddedAgent({
