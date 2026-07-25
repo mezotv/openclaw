@@ -545,7 +545,7 @@ export class ChatPaneRender extends ChatPaneHeaderRender {
       sidebarContent: state.sidebarContent,
       sidebarStacked: detailSplitWidth < DETAIL_SIDEBAR_SIDE_MIN_WIDTH,
       splitRatio: state.splitRatio,
-      canvasPluginSurfaceUrl: state.hello?.pluginSurfaceUrls?.canvas ?? null,
+      canvasPluginSurfaceUrl: state.canvasPluginSurfaceUrl,
       boardProvider: board.provider,
       onOpenSidebar: state.handleOpenSidebar,
       onCloseSidebar: () => {

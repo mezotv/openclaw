@@ -1275,6 +1275,7 @@ export function createPageState(
     connected: false,
     connectionEpoch: 0,
     hello: null,
+    canvasPluginSurfaceUrl: null,
     terminalAvailable: false,
     browserPanelAvailable: false,
     assistantAgentId: context.agentSelection.state.selectedId,
