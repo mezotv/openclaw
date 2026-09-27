@@ -295,9 +295,9 @@ Google roll out gradually, so a catalog model may not be enabled for your projec
     }
     ```
 
-    The same `cost`, `maxTokens` and `contextWindow` caveats from the OpenAI entry apply here: the
-    zeros are the beta rate, and you take `contextWindow` from the
-    [Neon model catalog](https://neon.com/docs/ai-gateway/models).
+    The same `cost`, `maxTokens` and `contextWindow` caveats from the OpenAI entry apply here: set
+    `cost` from the [Neon model catalog](https://neon.com/docs/ai-gateway/models), and take
+    `contextWindow` from that catalog as well.
 
     OpenClaw seeds a default `cacheRetention` only for direct Anthropic routes, so on a custom
     `anthropic-messages` endpoint like Neon you set `params.cacheRetention` yourself under
