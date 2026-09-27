@@ -30,8 +30,7 @@ same isolation your Neon database already has.
 </Note>
 
 <Note>
-  Neon AI Gateway is in beta. It requires a paid Neon plan and is only available in the AWS US East
-  (Ohio) region (`aws-us-east-2`), so the Neon project has to be created there.
+  Neon AI Gateway is generally available. It requires a paid Neon plan and is not available in every region; see [Regions](https://neon.com/docs/introduction/regions) for current coverage.
 </Note>
 
 ## Quick start
@@ -136,9 +135,7 @@ Because a Neon branch host is a public HTTPS endpoint, you do not need a private
 
 ### Cost and output limits
 
-The zero `cost` values are the real rate during the beta: Neon does not bill inference yet, and an
-omitted `cost` would resolve to the same zeros anyway. Neon says it will charge the model provider's
-published per-token rate with no markup once billing begins, so replace the zeros then. The catalog
+Set `cost` from the [Neon model catalog](https://neon.com/docs/ai-gateway/models). Neon charges the model provider's published per-token rate with no markup, billed from prepaid credits. The catalog
 rates for the three models above are $0.25 and $2.00 per million tokens for `gpt-5-mini`, $0.50 and
 $3.00 for `gemini-3-flash` and $0.15 and $1.20 for `qwen3-next-80b-a3b-instruct`. OpenClaw reads
 `cost` in USD per million tokens, so those numbers drop in as written.
@@ -319,14 +316,9 @@ Google roll out gradually, so a catalog model may not be enabled for your projec
   </Accordion>
 
   <Accordion title="Rate limits and quota">
-    During the beta Neon allows 200,000 tokens per minute per account, counting input and output
-    together. Going over returns `429 Too Many Requests` with a message naming the model. Upstream
-    output-token limits apply independently at 20,000 per minute for most models, so a `429` can
-    happen on output tokens alone.
+    Neon enforces account-level token-per-minute rate limits. Going over returns `429 Too Many Requests` with a message naming the model. Upstream output-token limits also apply, so a `429` can happen on output tokens alone.
 
-    Neon also enforces an account-level daily spend cap that returns `429` with error code
-    `REQUEST_LIMIT_EXCEEDED`, even though inference is free during the beta. Neon has not published a
-    fixed value for that cap.
+    Neon also enforces an account-level spend cap that returns `429` with error code `REQUEST_LIMIT_EXCEEDED`.
 
   </Accordion>
 
@@ -348,8 +340,7 @@ Google roll out gradually, so a catalog model may not be enabled for your projec
       no Responses `store`, no prompt-cache hints, no OpenAI reasoning-effort payload shaping.
     - Hidden OpenClaw attribution headers (`originator`, `version`, `User-Agent`) are only sent to
       verified native OpenAI endpoints, so they are not injected on a Neon base URL.
-    - Inference is free during the beta. Neon states it will pass through provider per-token rates
-      with no markup once billing begins.
+    - Inference uses prepaid credits on a paid plan. Neon charges the model provider's per-token rate with no markup. See the [AI Gateway overview](https://neon.com/docs/ai-gateway/overview).
   </Accordion>
 
   <Accordion title="Common errors and troubleshooting">
@@ -362,8 +353,7 @@ Google roll out gradually, so a catalog model may not be enabled for your projec
     - `400 model "<model-id>" is not available on the <endpoint> endpoint` means the model ID does not
       belong to the dialect you called, such as an OpenAI ID sent to `/anthropic` or a Claude ID sent to
       `/openai/v1`. Use the provider entry that matches the model.
-    - AI Gateway is in beta, paid-plan only and currently limited to AWS US East (Ohio)
-      (`aws-us-east-2`), so a project created elsewhere or on a free plan cannot reach it.
+    - AI Gateway is generally available on paid plans and is not available in every region, so a project created in an unsupported region or on a free plan cannot reach it. See [Regions](https://neon.com/docs/introduction/regions) for current coverage.
 
   </Accordion>
 </AccordionGroup>
