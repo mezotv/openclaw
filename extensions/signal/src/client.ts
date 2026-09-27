@@ -1,17 +1,13 @@
-// Signal plugin module implements client behavior.
 import { Buffer } from "node:buffer";
 import http, { type ClientRequest, type IncomingMessage } from "node:http";
 import https from "node:https";
 import { generateSecureUuid } from "openclaw/plugin-sdk/core";
 import { formatErrorMessage, toErrorObject } from "openclaw/plugin-sdk/error-runtime";
 import { resolveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
+import type { SignalRpcOptions } from "./client-types.js";
 import { signalUnixRpcRequest, streamSignalUnixEvents } from "./client-unix.js";
 
-export type SignalRpcOptions = {
-  baseUrl: string;
-  timeoutMs?: number;
-  maxResponseBytes?: number;
-};
+export type { SignalRpcOptions } from "./client-types.js";
 
 type SignalRpcError = {
   code?: number;
@@ -134,11 +130,13 @@ function requestSignalHttp(
     body?: string;
     timeoutMs: number;
     maxResponseBytes?: number;
+    assertDirectAdapterHandoff?: () => void;
   },
 ): Promise<SignalHttpResponse> {
   assertSignalHttpProtocol(url, "HTTP");
   const timeoutMs = resolveTimerTimeoutMs(options.timeoutMs, DEFAULT_TIMEOUT_MS);
   const client = url.protocol === "https:" ? https : http;
+  options.assertDirectAdapterHandoff?.();
   return new Promise((resolve, reject) => {
     let settled = false;
     const deadline = setTimeout(() => {
@@ -231,6 +229,7 @@ export async function signalRpcRequest<T = unknown>(
     body,
     timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     maxResponseBytes: opts.maxResponseBytes,
+    assertDirectAdapterHandoff: opts.assertDirectAdapterHandoff,
   });
   if (res.status === 201) {
     return undefined as T;

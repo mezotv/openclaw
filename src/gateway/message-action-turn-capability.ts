@@ -10,6 +10,7 @@ import {
   isDeliverableMessageChannel,
   normalizeMessageChannel,
 } from "../utils/message-channel-normalize.js";
+import type { CronAuthenticatedChannelRequester } from "./cron-creator-authority-grant.types.js";
 
 const DEFAULT_TTL_MS = 15 * 60_000;
 const MAX_TTL_MS = 24 * 60 * 60_000;
@@ -21,6 +22,8 @@ const CAPABILITY_COMPLETION_GRACE_MS = 60_000;
 type ScheduledMessageActionAuthority = {
   policy: ScheduledToolPolicyContext;
   assertCurrent: () => void;
+  assertSourceCurrent?: () => void;
+  channelRequester?: CronAuthenticatedChannelRequester;
 };
 
 /** Private handoff from authenticated dashboard admission to the exact reply run. */
@@ -159,15 +162,12 @@ function copyToolContext(
   };
 }
 
-function sweepExpiredMessageActionTurnCapabilities(nowMs: number = Date.now()): number {
-  let removed = 0;
+function sweepExpiredMessageActionTurnCapabilities(nowMs: number): void {
   for (const [token, capability] of capabilitiesByToken) {
     if (nowMs >= capability.expiresAtMs) {
       capabilitiesByToken.delete(token);
-      removed += 1;
     }
   }
-  return removed;
 }
 
 /**
@@ -220,24 +220,37 @@ export function mintMessageActionTurnCapability(params: {
     requesterSenderE164: normalizeOptionalString(params.requesterSenderE164),
     toolContext: copyToolContext(params.toolContext),
   };
+  const assertActive = () => {
+    if (capabilitiesByToken.get(token) !== capability || Date.now() >= capability.expiresAtMs) {
+      throw new Error("message action turn capability is no longer active");
+    }
+  };
   const scheduled = params.scheduled;
   if (scheduled) {
+    const assertSourceCurrent = scheduled.assertSourceCurrent;
     capability.scheduled = {
       policy: structuredClone(scheduled.policy),
+      ...(scheduled.channelRequester
+        ? { channelRequester: structuredClone(scheduled.channelRequester) }
+        : {}),
       assertCurrent: () => {
-        if (capabilitiesByToken.get(token) !== capability || Date.now() >= capability.expiresAtMs) {
-          throw new Error("message action turn capability is no longer active");
-        }
+        assertActive();
         scheduled.assertCurrent();
       },
+      ...(assertSourceCurrent
+        ? {
+            assertSourceCurrent: () => {
+              assertActive();
+              assertSourceCurrent();
+            },
+          }
+        : {}),
     };
   }
   const assertDashboardReadCurrent = params.assertDashboardReadCurrent;
   if (assertDashboardReadCurrent) {
     capability.assertDashboardReadCurrent = () => {
-      if (capabilitiesByToken.get(token) !== capability || Date.now() >= capability.expiresAtMs) {
-        throw new Error("message action turn capability is no longer active");
-      }
+      assertActive();
       assertDashboardReadCurrent();
     };
   }
@@ -299,11 +312,7 @@ function copyMessageActionTurnContext(
     expiresAtMs: capability.expiresAtMs,
     sessionId: capability.sessionId,
     sourceReplySessionKey: capability.sourceReplySessionKey,
-    requesterAccountId: capability.requesterAccountId,
-    requesterSenderId: capability.requesterSenderId,
-    requesterSenderName: capability.requesterSenderName,
-    requesterSenderUsername: capability.requesterSenderUsername,
-    requesterSenderE164: capability.requesterSenderE164,
+    ...selectMessageActionRequesterIdentity(capability),
     toolContext: copyToolContext(capability.toolContext),
   };
 }

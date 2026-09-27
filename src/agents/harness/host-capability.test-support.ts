@@ -1,10 +1,6 @@
-import { createAgentHarnessTaskRuntimeScope } from "../../tasks/agent-harness-task-runtime-scope.js";
-import {
-  createOperationalRunInstanceRef,
-  prepareAgentRunAdmission,
-  type AdmittedRunContext,
-} from "../admitted-run-context.js";
-import { createAgentHarnessHostCapabilities } from "./host-capability.js";
+import type { createAgentHarnessTaskRuntimeScope } from "../../tasks/agent-harness-task-runtime-scope.js";
+import type { AdmittedRunContext, AdmittedRunOperatorAuthority } from "../admitted-run-context.js";
+import type { createAgentHarnessHostCapabilities } from "./host-capability.js";
 
 type HostAttempt = Parameters<typeof createAgentHarnessHostCapabilities>[0]["attempt"];
 
@@ -19,7 +15,16 @@ type AdmittedHostCapabilityTestFixture = Readonly<{
 /** Creates the same admitted authority and closure-bound host used by a real harness attempt. */
 export async function createAdmittedHostCapabilityTestFixture(
   attempt: Omit<HostAttempt, "admittedRunContext">,
+  options: {
+    nativeModelPolicySupport?: "exact";
+    operatorAuthority?: AdmittedRunOperatorAuthority;
+  } = {},
 ): Promise<AdmittedHostCapabilityTestFixture> {
+  const { createAgentHarnessTaskRuntimeScope } =
+    await import("../../tasks/agent-harness-task-runtime-scope.js");
+  const { createOperationalRunInstanceRef, prepareAgentRunAdmission } =
+    await import("../admitted-run-context.js");
+  const { createAgentHarnessHostCapabilities } = await import("./host-capability.js");
   const admission = prepareAgentRunAdmission({
     cfg: attempt.config ?? {},
     facts: {
@@ -28,11 +33,13 @@ export async function createAdmittedHostCapabilityTestFixture(
       ingress: { kind: "system", boundary: "host-capability-test", state: "present" },
     },
     operationalRunInstance: createOperationalRunInstanceRef(attempt.runId),
+    operatorAuthority: options.operatorAuthority,
   });
   const admittedRunContext = await admission.admit("plugin-harness", `harness-${attempt.runId}`);
   const host = createAgentHarnessHostCapabilities({
     attempt: { ...attempt, admittedRunContext },
     pluginId: "codex",
+    nativeModelPolicySupport: options.nativeModelPolicySupport,
   });
   return {
     admittedRunContext,

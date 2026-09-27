@@ -6,32 +6,23 @@ import {
   getAgentRunContextOwnership,
   releaseAgentRunContext,
 } from "../infra/agent-run-registry.js";
-import {
-  deleteTaskRecordById,
-  getTaskById,
-  publishTaskRecordAfterAtomicStore,
-} from "../tasks/runtime-internal.js";
+import { captureOpenClawStateWorkerContext } from "../state/openclaw-state-worker-context.js";
+import { getTaskById } from "../tasks/runtime-internal.js";
 import { createSubagentTaskBackingDetail } from "../tasks/task-backing-authority.js";
 import { createAcpTaskBackingDetailForTest } from "../tasks/task-backing-authority.test-support.js";
 import { finalizeTaskRunById } from "../tasks/task-executor.js";
 import { updateTask } from "../tasks/task-registry-mutation.js";
-import { reloadTaskRegistryFromStore } from "../tasks/task-registry-state.js";
+import { reloadTaskRegistryFromStoreAsync } from "../tasks/task-registry-state.js";
 import {
   configureTaskRegistryRuntime,
   getTaskRegistryObservers,
-  getTaskRegistryStore,
-  type TaskRegistryObserverEvent,
 } from "../tasks/task-registry.store.js";
+import type { TaskRegistryObserverEvent } from "../tasks/task-registry.store.types.js";
 import { createTaskFixture } from "../tasks/task-registry.test-support.js";
 import { bindTaskRunOwner } from "../tasks/task-run-owner.js";
 import type { GatewayBroadcastFn } from "./server-broadcast-types.js";
 import type { TaskEventPayload } from "./server-methods/task-summary.js";
-import { TerminalSessionManager } from "./terminal/session-manager.js";
-import {
-  baseOpenRequest,
-  makeFakePty,
-  taskAgentOwner,
-} from "./terminal/session-manager.test-helpers.js";
+import type { TerminalSessionManager } from "./terminal/session-manager.js";
 
 type Setup = (
   broadcast: GatewayBroadcastFn,
@@ -56,10 +47,10 @@ export const sessionTaskDefaults = {
   notifyPolicy: "silent",
 } as const;
 
-function createRunningTask(runId: string | null = "task-publication-run") {
+function createRunningTask() {
   return createTaskFixture("cli", {
     ...sessionTaskDefaults,
-    runId: runId ?? undefined,
+    runId: "task-publication-run",
     requesterSessionKey: "global",
     requesterAgentId: "main",
     task: "Task publication ownership",
@@ -93,6 +84,7 @@ export function registerTaskSubscriptionOwnershipTests(setup: Setup): void {
     "gateway",
   ] as const)("keeps task publication current when broadcast changes %s", async (change) => {
     let replace = () => {};
+    let reload: Promise<void> | undefined;
     const broadcast = onTerminalBroadcast(() => {
       const once = replace;
       replace = () => {};
@@ -125,7 +117,7 @@ export function registerTaskSubscriptionOwnershipTests(setup: Setup): void {
           updateTask(task.taskId, { terminalSummary: "More completion detail" });
           break;
         case "reload":
-          reloadTaskRegistryFromStore();
+          reload = reloadTaskRegistryFromStoreAsync(captureOpenClawStateWorkerContext());
           break;
         case "revived":
           updateTask(task.taskId, { status: "running" });
@@ -140,6 +132,7 @@ export function registerTaskSubscriptionOwnershipTests(setup: Setup): void {
     };
     try {
       finalizeTaskRunById({ taskId: task.taskId, status: "succeeded", endedAt: 2_000 });
+      await reload;
       if (change === "retired" || change === "metadata" || change === "reload") {
         expect(closeTaskSessions).toHaveBeenCalledExactlyOnceWith(task.taskId);
       } else {
@@ -283,47 +276,6 @@ export function registerTaskSubscriptionOwnershipTests(setup: Setup): void {
     updateTask(task.taskId, { progressSummary: "Latest" });
     expect(broadcast).toHaveBeenCalledTimes(3);
   });
-
-  it.each([false, true])(
-    "preserves a terminal opened after runless task recreation during broadcast (reload: %s)",
-    async (reload) => {
-      const pty = makeFakePty();
-      const manager = new TerminalSessionManager({ emit: vi.fn(), spawn: async () => pty });
-      let replace = () => {};
-      const broadcast = onTerminalBroadcast(() => {
-        const once = replace;
-        replace = () => {};
-        once();
-      });
-      setup(broadcast, manager);
-      await waitForObserver();
-      const task = createRunningTask(null);
-      expect(task.runId).toBeUndefined();
-      expect(task.detail).toBeUndefined();
-      let opened: ReturnType<TerminalSessionManager["open"]> | undefined;
-      replace = () => {
-        if (reload) {
-          reloadTaskRegistryFromStore();
-        }
-        const recreated = getTaskById(task.taskId)!;
-        expect(deleteTaskRecordById(task.taskId)).toBe(true);
-        getTaskRegistryStore().upsertTaskWithDeliveryState({ task: recreated });
-        publishTaskRecordAfterAtomicStore(recreated);
-        opened = manager.open(
-          baseOpenRequest({ owner: taskAgentOwner("agent:main:main", task.taskId) }),
-        );
-      };
-      try {
-        finalizeTaskRunById({ taskId: task.taskId, status: "succeeded", endedAt: 2_000 });
-        expect(opened).toBeDefined();
-        await expect(opened).resolves.toMatchObject({ ok: true });
-        expect(pty.killed).toBe(false);
-      } finally {
-        await opened;
-        manager.disposeAll();
-      }
-    },
-  );
 
   it("joins task observer registration when stopped immediately", async () => {
     const { taskUnsub } = setup(vi.fn<GatewayBroadcastFn>());

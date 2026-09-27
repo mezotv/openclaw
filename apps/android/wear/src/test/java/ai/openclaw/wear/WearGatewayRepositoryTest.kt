@@ -226,7 +226,7 @@ class WearGatewayRepositoryTest {
 
             WearRpcMethod.GatewayDisconnect -> {
               json.parseToJsonElement(
-                """{"connected":false,"status":"Offline","activeAgentId":"main","selectedModelRef":"openai/gpt-test","capabilities":["agent-controls","gateway-controls","model-controls","model-catalog-search","session-selection-lookup","session-search-pagination","agent-pulse","attempt-scoped-realtime-audio"]}""",
+                """{"connected":false,"status":"Offline","activeAgentId":"main","selectedModelRef":"openai/gpt-test","capabilities":["agent-controls","gateway-controls","model-controls","model-catalog-search","session-selection-lookup","session-search-pagination","agent-pulse","attempt-scoped-realtime-audio","reply-text"]}""",
               )
             }
 
@@ -298,7 +298,7 @@ class WearGatewayRepositoryTest {
       val requester =
         RecordingRequester { _, _ ->
           json.parseToJsonElement(
-            """{"connected":true,"status":"Connected","capabilities":["agent-controls","future-capability","gateway-controls","model-controls","model-catalog-search","session-scoped-model-catalog","session-selection-lookup","session-search-pagination","agent-pulse","attempt-scoped-realtime-audio"]}""",
+            """{"connected":true,"status":"Connected","capabilities":["agent-controls","future-capability","gateway-controls","model-controls","model-catalog-search","session-scoped-model-catalog","session-selection-lookup","session-search-pagination","agent-pulse","attempt-scoped-realtime-audio","reply-text"]}""",
           )
         }
 
@@ -635,9 +635,9 @@ class WearGatewayRepositoryTest {
     assertTrue(tracker.isCurrent(token))
     assertEquals(
       WearLiveStreamSnapshot(text = "Hello world", complete = true, runId = "run-1"),
-      tracker.finish(token).liveStream,
+      tracker.finish(token),
     )
-    assertNull(tracker.finish(token).liveStream)
+    assertNull(tracker.finish(token))
   }
 
   @Test
@@ -645,7 +645,7 @@ class WearGatewayRepositoryTest {
     val tracker = WearHistoryLoadTracker()
     val token = tracker.start("session-1")
 
-    assertNull(tracker.finish(token).liveStream)
+    assertNull(tracker.finish(token))
   }
 
   @Test

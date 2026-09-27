@@ -49,10 +49,14 @@ import { shouldSkipLiveProviderDrift } from "../agents/live-test-provider-drift.
 import {
   isLiveBillingDrift,
   isLiveRateLimitDrift,
+  isChatGPTUsageLimitErrorMessage,
+  isOllamaUnavailableErrorMessage,
+  isAudioOnlyModelErrorMessage,
+  isUnsupportedThinkingToggleErrorMessage,
 } from "../agents/live-test-provider-drift.test-support.js";
 import { getApiKeyForModelCore, type ResolvedProviderAuth } from "../agents/model-auth.js";
 import { normalizeProviderId } from "../agents/model-selection.js";
-import { shouldSuppressBuiltInModelCore } from "../agents/model-suppression.js";
+import { resolveBuiltInModelSuppressionFromManifest } from "../agents/model-suppression.js";
 import { ensureOpenClawModelsJson } from "../agents/models-config.js";
 import { resolveProviderIdForAuth } from "../agents/provider-auth-aliases.js";
 import {
@@ -132,14 +136,11 @@ import { deleteTestEnvValue, setTestEnvValue, withEnvAsync } from "../test-utils
 import { getFreePort, isPortFree } from "../test-utils/ports.js";
 import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-channel.js";
 import { GatewayClient } from "./client.js";
+import {
+  isolateLiveGatewayConfig,
+  type ProviderThinkingModelCompat,
+} from "./gateway-models.profiles.live.test-helpers.js";
 import { restoreLiveEnv, snapshotLiveEnv } from "./live-env-test-helpers.js";
-import { READ_SCOPE, WRITE_SCOPE } from "./operator-scopes.js";
-import type { GatewayServer } from "./server-public.js";
-
-type ProviderThinkingModelCompat = {
-  thinkingFormat?: string;
-  supportedReasoningEfforts?: readonly string[] | null;
-};
 import {
   hasExpectedSingleNonce,
   hasExpectedToolNonce,
@@ -147,6 +148,8 @@ import {
   shouldRetryExecReadProbe,
   shouldRetryToolReadProbe,
 } from "./live-tool-probe.test-helpers.js";
+import { READ_SCOPE, WRITE_SCOPE } from "./operator-scopes.js";
+import type { GatewayServer } from "./server-public.js";
 import { readSessionMessagesAsync } from "./session-transcript-readers.js";
 import { loadSessionEntry } from "./session-utils.js";
 
@@ -2772,33 +2775,11 @@ function isAccountIdExtractionError(error: string): boolean {
   return /failed to extract accountid from token/i.test(error);
 }
 
-function isChatGPTUsageLimitErrorMessage(raw: string): boolean {
-  const msg = raw.toLowerCase();
-  return msg.includes("hit your chatgpt usage limit") && msg.includes("try again in");
-}
-
-function isOllamaUnavailableErrorMessage(raw: string): boolean {
-  const msg = raw.toLowerCase();
-  return (
-    msg.includes("ollama could not be reached") ||
-    (msg.includes("127.0.0.1:11434") && msg.includes("econnrefused")) ||
-    (msg.includes("localhost:11434") && msg.includes("econnrefused"))
-  );
-}
-
-function isAudioOnlyModelErrorMessage(raw: string): boolean {
-  return /requires that either input content or output modality contain audio/i.test(raw);
-}
-
 function isUnsupportedReasoningEffortErrorMessage(raw: string): boolean {
   return (
     /does not support parameter reasoningeffort/i.test(raw) ||
     /unsupported value:\s*'low'.*reasoning\.effort.*supported values are:\s*'medium'/i.test(raw)
   );
-}
-
-function isUnsupportedThinkingToggleErrorMessage(raw: string): boolean {
-  return /does not support parameter [`"]?enable_thinking[`"]?/i.test(raw);
 }
 
 function isInstructionsRequiredError(error: string): boolean {
@@ -5787,7 +5768,7 @@ function buildLiveGatewayConfig(params: {
   } satisfies NonNullable<OpenClawConfig["agents"]>["entries"];
   const baseModels = params.cfg.models;
   return {
-    ...params.cfg,
+    ...isolateLiveGatewayConfig(params.cfg),
     bindings: undefined,
     broadcast: undefined,
     agents: {
@@ -6256,10 +6237,12 @@ async function runGatewayModelSuite(params: GatewayModelSuiteParams) {
                     modelKey,
                     message: strictReply
                       ? "OpenClaw live tool probe (local, safe): " +
-                        `use the tool named \`read\` (or \`Read\`) with JSON arguments {"path":"${toolProbePath}"}. ` +
+                        "Follow the advertised tool interface; if tools are behind Code Mode, invoke them through Code Mode. " +
+                        `read the local file ${JSON.stringify(toolProbePath)} using the available file-reading tool. ` +
                         "Then reply with exactly the two test marker values from that file, separated by one space. No extra text."
                       : "OpenClaw live tool probe (local, safe): " +
-                        `use the tool named \`read\` (or \`Read\`) with JSON arguments {"path":"${toolProbePath}"}. ` +
+                        "Follow the advertised tool interface; if tools are behind Code Mode, invoke them through Code Mode. " +
+                        `read the local file ${JSON.stringify(toolProbePath)} using the available file-reading tool. ` +
                         "Then reply with the two test marker values you read (include both).",
                     thinkingLevel,
                     context: `${progressLabel}: tool-read`,
@@ -6352,14 +6335,16 @@ async function runGatewayModelSuite(params: GatewayModelSuiteParams) {
                     modelKey,
                     message: strictReply
                       ? "OpenClaw live tool probe (local, safe): " +
-                        "use the tool named `exec` (or `Exec`) to run this command: " +
+                        "Follow the advertised tool interface; if tools are behind Code Mode, invoke them through Code Mode. " +
+                        "use the available shell-execution tool to run this command: " +
                         `mkdir -p "${tempDir}" && printf '%s' '${nonceC}' > "${toolWritePath}". ` +
-                        `Then use the tool named \`read\` (or \`Read\`) with JSON arguments {"path":"${toolWritePath}"}. ` +
+                        `Then read the local file ${JSON.stringify(toolWritePath)} using the available file-reading tool. ` +
                         "Then reply with exactly the nonce text from that file. No extra text."
                       : "OpenClaw live tool probe (local, safe): " +
-                        "use the tool named `exec` (or `Exec`) to run this command: " +
+                        "Follow the advertised tool interface; if tools are behind Code Mode, invoke them through Code Mode. " +
+                        "use the available shell-execution tool to run this command: " +
                         `mkdir -p "${tempDir}" && printf '%s' '${nonceC}' > "${toolWritePath}". ` +
-                        `Then use the tool named \`read\` (or \`Read\`) with JSON arguments {"path":"${toolWritePath}"}. ` +
+                        `Then read the local file ${JSON.stringify(toolWritePath)} using the available file-reading tool. ` +
                         "Finally reply including the nonce text you read back.",
                     thinkingLevel,
                     context: `${progressLabel}: tool-exec`,
@@ -7036,7 +7021,10 @@ describeLive("gateway live (dev agent, profile keys)", () => {
         const candidates: PreparedGatewayLiveModelCandidate[] = [];
         const skipped: Array<{ model: string; error: string }> = [];
         for (const model of wanted) {
-          if (shouldSuppressBuiltInModelCore({ provider: model.provider, id: model.id })) {
+          if (
+            resolveBuiltInModelSuppressionFromManifest({ provider: model.provider, id: model.id })
+              ?.suppress
+          ) {
             continue;
           }
           if (!targetMatcher.matchesProvider(model.provider)) {

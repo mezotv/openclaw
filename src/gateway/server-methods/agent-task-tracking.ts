@@ -3,7 +3,7 @@ import {
   GATEWAY_CLIENT_MODES,
   GATEWAY_CLIENT_NAMES,
 } from "../../../packages/gateway-protocol/src/client-info.js";
-import { readAcpSessionMeta } from "../../acp/runtime/session-meta.js";
+import { readAcpSessionMetaAsync } from "../../acp/runtime/session-meta.js";
 import { getLatestLiveSubagentRunByChildSessionKey } from "../../agents/subagents/registry/subagent-registry-read.js";
 import { resolveAgentIdFromSessionKey, resolveAgentMainSessionKey } from "../../config/sessions.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
@@ -16,8 +16,11 @@ import {
   parseThreadSessionSuffix,
 } from "../../sessions/session-key-utils.js";
 import { finalizeTaskRunByRunId } from "../../tasks/detached-task-runtime.js";
-import { findTaskByRunId } from "../../tasks/runtime-internal.js";
-import type { TaskStatus } from "../../tasks/task-registry.types.js";
+import {
+  isTerminalTaskStatus,
+  type TaskRecord,
+  type TaskStatus,
+} from "../../tasks/task-registry.types.js";
 import { formatForLog } from "../ws-log.js";
 import type {
   GatewayContextResolver,
@@ -91,7 +94,12 @@ export type GatewayAgentTaskTrackingMode =
   | "cli"
   | "plugin_subagent"
   | "none"
-  | { kind: "session_followup"; requesterSessionKey: string; label?: string };
+  | {
+      kind: "session_followup";
+      requesterSessionKey: string;
+      label?: string;
+      existingTaskStatus?: TaskStatus;
+    };
 
 export function resolveGatewayAgentTaskTrackingMode(params: {
   client: GatewayRequestHandlerOptions["client"];
@@ -101,7 +109,7 @@ export function resolveGatewayAgentTaskTrackingMode(params: {
   sessionEntry?: Pick<SessionEntry, "spawnedBy" | "label" | "displayName" | "acp">;
   confirmedAcpManualSpawn?: boolean;
   modelRun?: boolean;
-  runId?: string;
+  existingTask?: Pick<TaskRecord, "runtime" | "childSessionKey" | "status">;
 }): GatewayAgentTaskTrackingMode {
   // Model probes are stateless one-shot work. A terminal CLI task row would
   // outlive the probe even when its session/transcript effects are internal.
@@ -111,7 +119,7 @@ export function resolveGatewayAgentTaskTrackingMode(params: {
   if (!params.sessionKey?.trim()) {
     return "none";
   }
-  const existingTask = params.runId ? findTaskByRunId(params.runId) : undefined;
+  const existingTask = params.existingTask;
   if (params.inputProvenance?.kind === "inter_session") {
     const requesterSessionKey = normalizeOptionalString(params.inputProvenance.sourceSessionKey);
     if (
@@ -123,7 +131,7 @@ export function resolveGatewayAgentTaskTrackingMode(params: {
       !params.sessionEntry.acp &&
       !isAcpSessionKey(params.sessionKey) &&
       !params.confirmedAcpManualSpawn &&
-      !existingTask
+      (!existingTask || isTerminalTaskStatus(existingTask.status))
     ) {
       // The new turn owns activity only. The original subagent keeps its
       // accepted result or yield obligation; sessions_send still owns replies.
@@ -131,6 +139,7 @@ export function resolveGatewayAgentTaskTrackingMode(params: {
         kind: "session_followup",
         requesterSessionKey,
         label: params.sessionEntry.label ?? params.sessionEntry.displayName,
+        existingTaskStatus: existingTask?.status,
       };
     }
     // Only the settlement batch owns automatic paused-run adoption. Individual
@@ -185,12 +194,12 @@ function isTrustedBackendAcpSpawnClient(client: GatewayRequestHandlerOptions["cl
   );
 }
 
-export function isConfirmedAcpManualSpawnTaskOwner(params: {
+export async function isConfirmedAcpManualSpawnTaskOwner(params: {
   acpTurnSource?: string;
   sessionKey?: string;
   client: GatewayRequestHandlerOptions["client"];
-  logGateway: Pick<GatewayRequestContext["logGateway"], "warn">;
-}): boolean {
+  assertCurrent: () => void;
+}): Promise<boolean> {
   const sessionKey = params.sessionKey;
   if (
     !isTrustedBackendAcpSpawnClient(params.client) ||
@@ -201,14 +210,12 @@ export function isConfirmedAcpManualSpawnTaskOwner(params: {
     return false;
   }
   try {
-    return readAcpSessionMeta({ sessionKey }) != null;
+    const meta = await readAcpSessionMetaAsync({ sessionKey, assertCurrent: params.assertCurrent });
+    params.assertCurrent();
+    return meta != null;
   } catch (err) {
-    params.logGateway.warn(
-      `failed to read ACP session metadata for manual-spawn task tracking ${sessionKey}; falling back to cli task tracking: ${formatForLog(
-        err,
-      )}`,
-    );
-    return false;
+    params.assertCurrent();
+    throw err;
   }
 }
 
@@ -220,6 +227,7 @@ export async function registerPluginSubagentRunFromGateway(params: {
   requester?: PluginSubagentRequesterContext;
   pluginId?: string;
   gatewayContextResolver?: GatewayContextResolver;
+  assertAdmissionCurrent: () => void;
 }): Promise<void> {
   const childSessionKey = params.childSessionKey.trim();
   if (!childSessionKey) {
@@ -232,6 +240,7 @@ export async function registerPluginSubagentRunFromGateway(params: {
   const requesterSessionKey = params.requester?.sessionKey ?? ownerSessionKey;
   const { adoptPausedSubagentRunForFollowUp, registerSubagentRun } =
     await import("../../agents/subagents/registry/subagent-registry.js");
+  params.assertAdmissionCurrent();
   // A follow-up aimed at a session paused by sessions_yield continues that run.
   // Registering a sibling row here would reassign the requester to this agent's
   // own main session and leave the original requester waiting behind a row that
@@ -251,34 +260,39 @@ export async function registerPluginSubagentRunFromGateway(params: {
   ) {
     return;
   }
-  registerSubagentRun({
-    runId: params.runId,
-    childSessionKey,
-    controllerSessionKey: ownerSessionKey,
-    requesterSessionKey,
-    requesterOrigin: params.requester?.origin,
-    requesterDisplayKey: params.requester ? requesterSessionKey : "main",
-    task: params.task,
-    cleanup: "keep",
-    ...(params.pluginId ? { label: `plugin:${params.pluginId}` } : {}),
-    expectsCompletionMessage: params.requester !== undefined,
-    spawnMode: "run",
-    ...(params.gatewayContextResolver
-      ? { gatewayContextResolver: params.gatewayContextResolver }
-      : {}),
-  });
+  await registerSubagentRun(
+    {
+      runId: params.runId,
+      childSessionKey,
+      controllerSessionKey: ownerSessionKey,
+      requesterSessionKey,
+      requesterOrigin: params.requester?.origin,
+      requesterDisplayKey: params.requester ? requesterSessionKey : "main",
+      task: params.task,
+      cleanup: "keep",
+      ...(params.pluginId ? { label: `plugin:${params.pluginId}` } : {}),
+      expectsCompletionMessage: params.requester !== undefined,
+      spawnMode: "run",
+      ...(params.gatewayContextResolver
+        ? { gatewayContextResolver: params.gatewayContextResolver }
+        : {}),
+    },
+    { assertCurrent: params.assertAdmissionCurrent },
+  );
 }
 
 export function tryFinalizeTrackedAgentTask(params: {
+  finalizeRun?: typeof finalizeTaskRunByRunId;
   runId: string;
   sessionKey?: string;
   status: GatewayAgentTaskTerminalStatus;
   error?: string;
   terminalSummary?: string;
+  isIncognito?: boolean;
   log: Pick<GatewayRequestContext["logGateway"], "warn">;
 }): void {
   try {
-    finalizeTaskRunByRunId({
+    (params.finalizeRun ?? finalizeTaskRunByRunId)({
       runId: params.runId,
       runtime: "cli",
       sessionKey: params.sessionKey,
@@ -290,6 +304,8 @@ export function tryFinalizeTrackedAgentTask(params: {
   } catch (err) {
     // Best-effort only: background task tracking must not block agent runs.
     // Still surface the swallowed error so non-transient finalize failures stay observable.
-    params.log.warn(`failed to finalize tracked agent task ${params.runId}: ${formatForLog(err)}`);
+    params.log.warn(
+      `failed to finalize tracked agent task ${params.runId}: ${params.isIncognito ? "Incognito agent error." : formatForLog(err)}`,
+    );
   }
 }

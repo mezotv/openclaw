@@ -1,11 +1,10 @@
 // Windows schtasks stop tests cover stopping scheduled task services.
 import type { SpawnSyncOptions } from "node:child_process";
 import fs from "node:fs/promises";
-import path from "node:path";
+import { hostname } from "node:os";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import type { GatewayOwnerLeaseIdentity } from "../infra/gateway-owner-lease.js";
-import { withStateDatabaseCoordinatorRuntimeDirectory } from "../infra/state-database-coordinator.js";
 import "./test-helpers/schtasks-base-mocks.js";
 import {
   inspectPortUsageMock,
@@ -22,6 +21,9 @@ const timeState = vi.hoisted(() => ({ now: 0 }));
 const readGatewayOwnerLease = vi.hoisted(() =>
   vi.fn<typeof import("../infra/gateway-owner-lease.js").readGatewayOwnerLease>(),
 );
+const readWindowsProcessStartTimeSync = vi.hoisted(() =>
+  vi.fn<typeof import("../infra/windows-process-start.js").readWindowsProcessStartTimeSync>(),
+);
 const sleepMock = vi.hoisted(() =>
   vi.fn(async (ms: number) => {
     timeState.now += ms;
@@ -35,6 +37,16 @@ type SpawnSyncResult = {
   status: number;
   signal: null;
 };
+function spawnSyncResult(stdout: string, status = 0): SpawnSyncResult {
+  return {
+    pid: 0,
+    output: [null, stdout, ""],
+    stdout,
+    stderr: "",
+    status,
+    signal: null,
+  };
+}
 const spawnSync = vi.hoisted(() =>
   vi.fn<(command: string, args?: readonly string[], options?: SpawnSyncOptions) => SpawnSyncResult>(
     () => ({
@@ -58,6 +70,7 @@ vi.mock("../infra/gateway-processes.js", () => ({
     findVerifiedGatewayListenerPidsOnPortSync(port),
 }));
 vi.mock("../infra/gateway-owner-lease.js", () => ({ readGatewayOwnerLease }));
+vi.mock("../infra/windows-process-start.js", () => ({ readWindowsProcessStartTimeSync }));
 vi.mock("../utils.js", async () => {
   const actual = await vi.importActual<typeof import("../utils.js")>("../utils.js");
   return {
@@ -86,7 +99,7 @@ const INSTALLED_GATEWAY_COMMAND_LINE =
 const GATEWAY_OWNER: GatewayOwnerLeaseIdentity = {
   owner: "gateway-owner-1",
   pid: 4242,
-  host: "gateway-test-host",
+  host: hostname(),
   startedAt: 100,
   port: GATEWAY_PORT,
   mode: "supervised",
@@ -195,7 +208,7 @@ async function withPreparedGatewayTask(
   run: (context: { env: Record<string, string>; stdout: PassThrough }) => Promise<void>,
   launcherSuffix = "",
 ) {
-  await withWindowsEnv("openclaw-win-stop-", async ({ tmpDir, env }) => {
+  await withWindowsEnv("openclaw-win-stop-", async ({ env }) => {
     await writeGatewayScript(env, GATEWAY_PORT);
     if (launcherSuffix) {
       const scriptPath = resolveTaskScriptPath(env);
@@ -203,15 +216,15 @@ async function withPreparedGatewayTask(
       await fs.writeFile(scriptPath, `${script.trimEnd()} ${launcherSuffix}\r\n`);
     }
     const stdout = new PassThrough();
-    await withStateDatabaseCoordinatorRuntimeDirectory(path.join(tmpDir, "coordinators"), () =>
-      run({ env, stdout }),
-    );
+    await run({ env, stdout });
   });
 }
 
 beforeEach(() => {
   resetSchtasksBaseMocks();
   readGatewayOwnerLease.mockReset();
+  readWindowsProcessStartTimeSync.mockReset();
+  readWindowsProcessStartTimeSync.mockReturnValue(GATEWAY_OWNER.startedAt);
   findVerifiedGatewayListenerPidsOnPortSync.mockReset();
   findVerifiedGatewayListenerPidsOnPortSync.mockReturnValue([]);
   timeState.now = 0;
@@ -250,12 +263,14 @@ export {
   probeProcessState,
   pushSuccessfulSchtasksResponses,
   readGatewayOwnerLease,
+  readWindowsProcessStartTimeSync,
   resolveScheduledTaskOwnedGatewayPids,
   resolveTaskScriptPath,
   restartScheduledTask,
   resumeScheduledTaskAutoStartAfterUpdate,
   setTaskStateProbeResult,
   spawnSync,
+  spawnSyncResult,
   startScheduledTask,
   stopScheduledTask,
   suspendScheduledTaskAutoStartForUpdate,

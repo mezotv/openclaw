@@ -55,17 +55,15 @@ export function hasRegisteredShowWidgetKinds(): boolean {
 
 function createShowWidgetToolSchema(
   kinds: readonly string[],
-  presenters: readonly WidgetPresenter[],
+  presenters: readonly Exclude<WidgetPresenter, { target: "current_channel" }>[],
   capabilityGuidance: string,
   pinnedOnly: boolean,
   reportAvailable: boolean,
 ) {
-  const presenterTargets = presenters.flatMap((presenter) =>
-    presenter.target === "current_channel" ? [] : [presenter.target],
-  );
+  const presenterTargets = presenters.map((presenter) => presenter.target);
   const targets = ["assistant_message", ...presenterTargets] as const;
-  const presenterDescriptions = presenters.flatMap((presenter) =>
-    presenter.target === "current_channel" ? [] : [`${presenter.target}: ${presenter.description}`],
+  const presenterDescriptions = presenters.map(
+    (presenter) => `${presenter.target}: ${presenter.description}`,
   );
   const widgetCode = Type.String({
     description:
@@ -323,7 +321,7 @@ export function createShowWidgetTool(options: ShowWidgetToolOptions = {}): AnyAg
   return {
     label: "Show Widget",
     name: "show_widget",
-    description: `Visual helps? Make widget. Do not wait for ask. ${usageGuidance} Update pinned HTML by name. Use for code architecture, execution traces, performance comparisons, interactive explanations, UI mockups, and dashboards. Text clearer? Skip. Load the visualize skill when available for composition and dashboard authoring. The source kind defaults to html${advertisedRegisteredKinds.length ? ` and registered kinds are ${advertisedRegisteredKinds.join(", ")}` : ""}. Send markup directly in widget_code. Scripts, stylesheets, and fonts may load from ${WIDGET_CDN_ORIGINS.join(", ")}; pin library versions. Inline widgets cannot fetch APIs. Pinned data access needs declared and granted capabilities.netOrigins or capabilities.tools; inline previews never inherit those grants. Keep filters and controls local; user-clicked openclaw.prompt.send(text) requests an agent follow-up in the Control UI. Data, action, state, and cron host APIs are dashboard-only. openclaw.host.controlUiBaseUrl is the Control UI origin plus base path after dashboard initialization, otherwise null; read it at click time. Dashboard HTML links support HTTP(S) destinations only; open them with target="_blank" and rel="noopener noreferrer". Put local workspace file links in chat Markdown, not widget HTML; file:// links cannot open the Files panel. \`title\` is host metadata. Start directly with content; do not repeat the title or recreate dashboard chrome. Use host theme variables such as --text, --muted, --card, --border, --accent, --font-body, and --font-mono. Inline script syntax errors return line and column; fix and retry. Check library loading and rendered interactions; hosting success alone is not visual proof.${reportGuidance}${presenterPrompt}`,
+    description: `Visual helps? Make widget. Do not wait for ask. ${usageGuidance} Update pinned HTML by name. Use for code architecture, execution traces, performance comparisons, interactive explanations, UI mockups, and dashboards. Text clearer? Skip. Load the visualize skill when available for composition and dashboard authoring. The source kind defaults to html${advertisedRegisteredKinds.length ? ` and registered kinds are ${advertisedRegisteredKinds.join(", ")}` : ""}. Send markup directly in widget_code. Scripts, stylesheets, and fonts may load from ${WIDGET_CDN_ORIGINS.join(", ")}; pin library versions. Use direct HTTPS URLs for audio/video, or data/blob URLs for embedded/generated clips. Images must be data URLs; media playback does not grant fetch access. Inline widgets cannot fetch APIs. Pinned data access needs declared and granted capabilities.netOrigins or capabilities.tools; inline previews never inherit those grants. Keep filters and controls local; user-clicked openclaw.prompt.send(text) requests an agent follow-up in the Control UI. Data, action, state, and cron host APIs are dashboard-only. openclaw.host.controlUiBaseUrl is the Control UI origin plus base path after dashboard initialization, otherwise null; read it at click time. Dashboard HTML links support HTTP(S) destinations only; open them with target="_blank" and rel="noopener noreferrer". Put local workspace file links in chat Markdown, not widget HTML; file:// links cannot open the Files panel. \`title\` is host metadata. Start directly with content; do not repeat the title or recreate dashboard chrome. Use host theme variables such as --text, --muted, --card, --border, --accent, --font-body, and --font-mono. Inline script syntax errors return line and column; fix and retry. Check library loading and rendered interactions; hosting success alone is not visual proof.${reportGuidance}${presenterPrompt}`,
     parameters: createShowWidgetToolSchema(
       kinds,
       explicitPresenters,
@@ -419,8 +417,7 @@ export function createShowWidgetTool(options: ShowWidgetToolOptions = {}): AnyAg
         }
       }
       const currentPresenterSupportsKind =
-        currentChannelPresenter?.target === "current_channel" &&
-        currentChannelPresenter.capabilities.sourceKinds.includes(kind);
+        currentChannelPresenter?.capabilities.sourceKinds.includes(kind);
       const wantsCurrentChannel =
         requestedTarget === "assistant_message" && currentPresenterSupportsKind;
       const wantsNodePanel = requestedTarget === "node_panel";
@@ -429,7 +426,7 @@ export function createShowWidgetTool(options: ShowWidgetToolOptions = {}): AnyAg
           "inline widget hosting is disabled; set pin=true to place the widget on the session dashboard",
         );
       }
-      if (wantsCurrentChannel && currentChannelPresenter?.target === "current_channel") {
+      if (wantsCurrentChannel && currentChannelPresenter) {
         const { maxSourceBytes } = currentChannelPresenter.capabilities;
         if (maxSourceBytes !== undefined) {
           assertWidgetHtmlSize(rawWidgetCode, maxSourceBytes, { inputName: "widget_code" });

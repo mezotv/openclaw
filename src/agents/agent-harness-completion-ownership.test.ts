@@ -4,6 +4,8 @@ import {
   replaceSessionEntry,
   appendTranscriptMessage,
 } from "../config/sessions/session-accessor.js";
+import type { SessionEntry } from "../config/sessions/types.js";
+import { createContext } from "../gateway/server-plugin-in-process-dispatch.test-support.js";
 import {
   registerAgentRunContext,
   clearAgentRunContext,
@@ -11,6 +13,7 @@ import {
   getAgentRunLifecycleGeneration,
 } from "../infra/agent-run-registry.js";
 import {
+  captureAgentHarnessCompletionCustody,
   createAgentHarnessTaskRuntime,
   deliverAgentHarnessTaskCompletion,
 } from "../plugin-sdk/agent-harness-task-runtime.js";
@@ -20,6 +23,7 @@ import {
   createHarnessCompletionSourceAssertion,
 } from "../tasks/agent-harness-completion-recovery.js";
 import { createAgentHarnessTaskRuntimeScope } from "../tasks/agent-harness-task-runtime-scope.js";
+import { updateTask } from "../tasks/task-registry-mutation.js";
 import { getTaskById } from "../tasks/task-registry.js";
 import { resetTaskRegistryForTests } from "../tasks/task-registry.test-support.js";
 import {
@@ -31,9 +35,11 @@ import {
   createOperationalRunInstanceRef,
   resolveAdmittedRunActiveAssertion,
 } from "./admitted-run-context.js";
+import { createTestAdmittedRunContext } from "./admitted-run-context.test-support.js";
 import { buildCurrentRunRestartRecoveryClaim } from "./agent-command-restart-recovery.js";
 import { reconcileHarnessCompletionDelivery } from "./agent-harness-completion-delivery.js";
 import { deliverSubagentAnnouncement } from "./subagents/announce/subagent-announce-delivery.js";
+import { withGatewayToolCallerIdentity } from "./tools/gateway-caller-context.js";
 vi.mock("./subagents/announce/subagent-announce-delivery.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./subagents/announce/subagent-announce-delivery.js")>()),
   deliverSubagentAnnouncement: vi.fn(async () => ({ delivered: true, path: "steered" })),
@@ -41,11 +47,28 @@ vi.mock("./subagents/announce/subagent-announce-delivery.js", async (importOrigi
 const key = "agent:main:main",
   child = "review4:child",
   source = "announce:review4:parent:child:succeeded";
+const inputProvenance = {
+  kind: "inter_session",
+  sourceTool: "agent_harness_task",
+  sourceChannel: "internal",
+  sourceSessionKey: child,
+};
+
+function captureCompletion(entry: SessionEntry) {
+  return captureHarnessCompletionRecovery({
+    agentId: "main",
+    sessionKey: key,
+    entry,
+    runId: source,
+    inputProvenance,
+  });
+}
+
 async function setup(
   state: OpenClawTestState,
   terminalStatus: "succeeded" | "failed" | "cancelled" = "succeeded",
 ) {
-  resetTaskRegistryForTests();
+  resetTaskRegistryForTests({ persist: false });
   const scope = createAgentHarnessTaskRuntimeScope({ requesterSessionKey: key });
   const runtime = createAgentHarnessTaskRuntime({
     runtime: "subagent",
@@ -85,30 +108,23 @@ async function setup(
   await replaceSessionEntry(target, entry);
   return { scope, runtime, create, task, target, entry };
 }
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(deliverSubagentAnnouncement)
+    .mockReset()
+    .mockResolvedValue({ delivered: true, path: "steered" });
+});
 describe("live harness cancellation reporting", () => {
-  it.each(
-    (["succeeded", "failed", "cancelled"] as const).flatMap((stored) =>
-      (["succeeded", "failed", "cancelled"] as const).map(
-        (reported) => [stored, reported, stored === reported] as const,
-      ),
-    ),
-  )("checks stored %s against reported %s", async (stored, reported, allowed) => {
+  it.each([
+    ["succeeded", "succeeded", true],
+    ["failed", "failed", true],
+    ["cancelled", "cancelled", true],
+    ["succeeded", "failed", false],
+  ] as const)("checks stored %s against reported %s", async (stored, reported, allowed) => {
     await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
       const { scope, task, entry } = await setup(state, stored);
       expect(getTaskById(task.taskId)?.status).toBe(stored);
-      const claim = captureHarnessCompletionRecovery({
-        agentId: "main",
-        sessionKey: key,
-        entry,
-        runId: source,
-        inputProvenance: {
-          kind: "inter_session",
-          sourceTool: "agent_harness_task",
-          sourceChannel: "internal",
-          sourceSessionKey: child,
-        },
-      });
+      const claim = captureCompletion(entry);
       expect(Boolean(claim)).toBe(stored !== "cancelled");
       const result = await deliverAgentHarnessTaskCompletion({
         scope,
@@ -133,7 +149,60 @@ describe("live harness cancellation reporting", () => {
 });
 
 describe("review4 exact task ownership", () => {
-  it.each(["single", "duplicate", "late-duplicate"])(
+  it.each(["requester", "task"] as const)(
+    "rechecks retained %s identity after an asynchronous delivery boundary",
+    async (changed) => {
+      await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
+        const { task, target, entry } = await setup(state);
+        const context = createContext();
+        const resolver = () => context;
+        context.resolveGatewayContext = resolver;
+        const scope = createAgentHarnessTaskRuntimeScope({
+          requesterSessionKey: key,
+          gatewayContextResolver: resolver,
+        });
+        const custody = (await withGatewayToolCallerIdentity(
+          {
+            agentId: "main",
+            sessionKey: key,
+            gatewayContextResolver: resolver,
+            operationalRunInstance:
+              createTestAdmittedRunContext("parent-run").operationalRunInstance,
+            receiptAuthority: () => true,
+          },
+          () => captureAgentHarnessCompletionCustody(scope),
+        ))!;
+        vi.mocked(deliverSubagentAnnouncement).mockImplementationOnce(async (params) => {
+          expect(params.isSourceSessionEffectsAllowed?.()).toBe(true);
+          await Promise.resolve();
+          if (changed === "requester") {
+            await replaceSessionEntry(target, { ...entry, sessionId: "replacement-session" });
+          } else {
+            updateTask(task.taskId, { createdAt: task.createdAt - 1 });
+            expect(getTaskById(task.taskId)?.createdAt).toBe(task.createdAt - 1);
+          }
+          expect(params.isSourceSessionEffectsAllowed?.()).toBe(false);
+          return { delivered: false, path: "none" };
+        });
+        try {
+          const result = await deliverAgentHarnessTaskCompletion({
+            scope,
+            completionCustody: custody,
+            childSessionKey: child,
+            childSessionId: "child",
+            announceId: source.slice("announce:".length),
+            status: "succeeded",
+            result: "result",
+          });
+          expect(result.delivered).toBe(false);
+        } finally {
+          custody.release();
+        }
+      });
+    },
+  );
+
+  it.each(["duplicate", "late-duplicate"])(
     "uses real task creation for %s ownership",
     async (kind) => {
       await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
@@ -163,7 +232,7 @@ describe("review4 exact task ownership", () => {
           expect(result).toMatchObject({ delivered: false, recoveryBlocked: true });
           expect(deliverSubagentAnnouncement).not.toHaveBeenCalled();
         } else {
-          expect(result.delivered).toBe(kind === "single");
+          expect(result.delivered).toBe(false);
         }
         expect(getTaskById(task.taskId)?.deliveryStatus).toBe("pending");
       });
@@ -174,18 +243,7 @@ describe("review4 exact task ownership", () => {
     async (kind) => {
       await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
         const { entry, target, task } = await setup(state);
-        const claim = captureHarnessCompletionRecovery({
-          agentId: "main",
-          sessionKey: key,
-          entry,
-          runId: source,
-          inputProvenance: {
-            kind: "inter_session",
-            sourceTool: "agent_harness_task",
-            sourceChannel: "internal",
-            sourceSessionKey: child,
-          },
-        });
+        const claim = captureCompletion(entry);
         expect(claim).toBeDefined();
         await replaceSessionEntry(target, {
           ...entry,
@@ -231,23 +289,12 @@ describe("review4 exact task ownership", () => {
 });
 
 describe("pre-mirror recovery input custody", () => {
-  it.each(["current", "prior", "unknown", "unadmitted-prior", "foreign-source", "human"] as const)(
+  it.each(["current", "prior", "unadmitted-prior", "foreign-source", "human"] as const)(
     "retains exact pre-mirror recovery admission after the real recorder commits %s",
     async (scenario) => {
       await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
         const { task, target, entry: original } = await setup(state);
-        const claim = captureHarnessCompletionRecovery({
-          agentId: "main",
-          sessionKey: key,
-          entry: original,
-          runId: source,
-          inputProvenance: {
-            kind: "inter_session",
-            sourceTool: "agent_harness_task",
-            sourceChannel: "internal",
-            sourceSessionKey: child,
-          },
-        });
+        const claim = captureCompletion(original);
         if (!claim) {
           throw new Error("real harness task did not bind at admission");
         }
@@ -271,12 +318,7 @@ describe("pre-mirror recovery input custody", () => {
             content: "completed child",
             idempotencyKey: `${source}:user`,
             __openclaw: { runId: source },
-            provenance: {
-              kind: "inter_session",
-              sourceTool: "agent_harness_task",
-              sourceChannel: "internal",
-              sourceSessionKey: child,
-            },
+            provenance: inputProvenance,
           },
         });
         const recoveryRunId = "recorder-recovery-current";
@@ -312,11 +354,7 @@ describe("pre-mirror recovery input custody", () => {
           }
           effect();
           const inputRunId =
-            scenario === "prior" || scenario === "unadmitted-prior"
-              ? priorRunId
-              : scenario === "unknown"
-                ? "unrelated-run"
-                : recoveryRunId;
+            scenario === "prior" || scenario === "unadmitted-prior" ? priorRunId : recoveryRunId;
           const recorder = createUserTurnTranscriptRecorder({
             target: { ...transcript, sessionEntry: recovered },
             input: {

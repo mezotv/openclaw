@@ -26,6 +26,7 @@ import {
   buildMcpRequesterRuntimeCacheKey,
   partitionMcpServersByConnectionScope,
 } from "./mcp-connection-resolver.js";
+import { resetMcpStartupBackoff } from "./mcp-startup-backoff.js";
 
 type RuntimeAcquisitionParams = Parameters<SessionMcpRuntimeManager["acquire"]>[0];
 type PreparedAcquisitionParams = RuntimeAcquisitionParams & {
@@ -336,10 +337,16 @@ export function createSessionMcpRuntimeManager(
       return true;
     },
     async completeDeferredRetirement(sessionId, runtime) {
-      if (
-        !store.deferredRetirementSessionIds.has(sessionId) ||
-        (runtime !== undefined && runtime.sessionId !== sessionId)
-      ) {
+      if (runtime !== undefined && runtime.sessionId !== sessionId) {
+        return false;
+      }
+      if (!store.deferredRetirementSessionIds.has(sessionId)) {
+        for (const runtimeKey of lifecycle.runtimeKeysForSessionId(sessionId)) {
+          const current = store.runtimesBySessionId.get(runtimeKey);
+          if (current && sessionMcpRuntimeOwners.get(current)?.hasServers() === false) {
+            await lifecycle.releaseEmptyRuntimeSlot(runtimeKey, current);
+          }
+        }
         return false;
       }
       if (
@@ -369,6 +376,7 @@ export function createSessionMcpRuntimeManager(
       return true;
     },
     async reloadConfig(reload) {
+      resetMcpStartupBackoff();
       store.configReload = {
         ...reload,
         pluginGeneration:
@@ -393,7 +401,10 @@ export function createSessionMcpRuntimeManager(
         }),
       );
     },
-    disposeAll: () => lifecycle.disposeManagedRuntimes(),
+    disposeAll: () => {
+      resetMcpStartupBackoff();
+      return lifecycle.disposeManagedRuntimes();
+    },
     sweepIdleRuntimes: lifecycle.sweepIdleRuntimes,
     listSessionIds() {
       return [

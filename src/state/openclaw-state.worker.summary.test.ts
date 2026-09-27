@@ -1,10 +1,20 @@
 import { existsSync } from "node:fs";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
+  acquireStateDatabaseSchemaLease,
+  assertStateDatabaseAccessAllowed,
+} from "../infra/gateway-state-owner.js";
+import {
   createSqliteAuditRecordKernel,
   prepareSqliteAuditRecord,
 } from "../infra/sqlite-audit-record.kernel.js";
+import { SQLITE_WORKER_PREPARE_COMMAND } from "../infra/sqlite-worker-contract.js";
+import {
+  createSqliteWorkerOperationAdmission,
+  withSqliteWorkerOperationAdmission,
+} from "../infra/sqlite-worker-operation-admission.js";
 import { runWithSqliteWorkerStateContext } from "../infra/sqlite-worker-state-context.js";
+import { withStateDatabaseSchemaMaintenance } from "../infra/state-database-maintenance.js";
 import { buildFlowRecord } from "../tasks/task-flow-registry.records.js";
 import { upsertTaskFlowRegistryRecordToSqlite } from "../tasks/task-flow-registry.store.sqlite.js";
 import { readTaskRegistrySnapshot } from "../tasks/task-registry.store.kernel.js";
@@ -37,7 +47,7 @@ afterEach(async () => {
   await state.cleanup();
 });
 
-function fixture(statuses: readonly TaskStatus[] = ["running"]) {
+async function fixture(statuses: readonly TaskStatus[] = ["running"]) {
   const ownerKey = "agent:main:summary";
   const flow = buildFlowRecord({
     controllerId: "tests/summary",
@@ -80,6 +90,7 @@ function fixture(statuses: readonly TaskStatus[] = ["running"]) {
     createSqliteWorkerBackend(undefined, { databasePath: context.admission.databasePath }),
   );
   backends.add(backend);
+  await backend[SQLITE_WORKER_PREPARE_COMMAND]?.("flows.summary");
   const summary = (requestedOwner = ownerKey, flowId = flow.flowId) =>
     runWithSqliteWorkerStateContext(context, () =>
       backend.execute({ type: "flows.summary", input: { ownerKey: requestedOwner, flowId } }),
@@ -94,8 +105,8 @@ function fixture(statuses: readonly TaskStatus[] = ["running"]) {
   return { summary, detail, database: openOpenClawStateDatabase() };
 }
 
-it("counts every status and runtime without mixing another flow, including empty and missing flows", () => {
-  const { summary, database } = fixture([
+it("counts every status and runtime without mixing another flow, including empty and missing flows", async () => {
+  const { summary, database } = await fixture([
     "queued",
     "running",
     "succeeded",
@@ -166,6 +177,8 @@ it("retains the shared native handle until its last actor closes and preserves r
     openExistingSqliteWorkerBackend(undefined, { databasePath: context.admission.databasePath }),
   );
   backends.add(first).add(second);
+  await first[SQLITE_WORKER_PREPARE_COMMAND]?.("flows.createManaged");
+  await second[SQLITE_WORKER_PREPARE_COMMAND]?.("flows.current");
   const database = openOpenClawStateDatabase();
   const flow = buildFlowRecord({
     controllerId: "tests/native-borrow",
@@ -205,6 +218,7 @@ it("retains the shared native handle until its last actor closes and preserves r
     createSqliteWorkerBackend(undefined, { databasePath: reopenedContext.admission.databasePath }),
   );
   backends.add(reopened);
+  await reopened[SQLITE_WORKER_PREPARE_COMMAND]?.("flows.current");
   expect(
     runWithSqliteWorkerStateContext(reopenedContext, () =>
       reopened.execute({ type: "flows.current", input: { flowId: flow.flowId } }),
@@ -222,30 +236,61 @@ it.each(["kv", "task"] as const)(
       openExistingSqliteWorkerBackend(undefined, { databasePath }),
     );
     backends.add(kv);
+    await kv[SQLITE_WORKER_PREPARE_COMMAND]?.("pluginState.lookup");
     expect(
       runWithSqliteWorkerStateContext(context, () =>
         kv.execute({ type: "pluginState.lookup", input: key }),
       ),
     ).toEqual({ ok: true, value: undefined });
     expect(existsSync(databasePath)).toBe(false);
-    expect(
-      runWithSqliteWorkerStateContext(context, () =>
-        kv.execute({
-          type: "pluginState.register",
-          input: {
-            ...key,
-            valueJson: JSON.stringify({ value: 42 }),
-            maxEntries: 4,
-            maxPluginEntries: 8,
-            overflowPolicy: "reject-new",
-          },
-        }),
-      ),
-    ).toEqual({ ok: true, value: undefined });
+    const stages: string[] = [];
+    withStateDatabaseSchemaMaintenance({ databasePath }, () => {
+      const admission = createSqliteWorkerOperationAdmission((request, grant) => {
+        stages.push(request.stage);
+        context.admission.assertCurrent();
+        grant();
+      });
+      admission.bindDatabaseAuthority({
+        databasePath,
+        assertRequest: context.admission.assertCurrent,
+        assertAccess: () => assertStateDatabaseAccessAllowed(databasePath),
+        acquireSchema: () => acquireStateDatabaseSchemaLease(databasePath),
+      });
+      const nativePost = admission.port.postMessage.bind(admission.port);
+      // Both native backends share this thread; service the real grant before its synchronous wait.
+      const dispatch = vi
+        .spyOn(admission.port, "postMessage")
+        .mockImplementation((message, transferList) => {
+          nativePost(message, transferList);
+          admission.service();
+        });
+      try {
+        expect(
+          runWithSqliteWorkerStateContext(context, () =>
+            withSqliteWorkerOperationAdmission({ port: admission.port }, () =>
+              kv.execute({
+                type: "pluginState.register",
+                input: {
+                  ...key,
+                  valueJson: JSON.stringify({ value: 42 }),
+                  maxEntries: 4,
+                  overflowPolicy: "reject-new",
+                },
+              }),
+            ),
+          ),
+        ).toEqual({ ok: true, value: undefined });
+        expect(stages).toEqual(["transaction", "commit"]);
+      } finally {
+        dispatch.mockRestore();
+        admission.finish();
+      }
+    });
     const task = runWithSqliteWorkerStateContext(context, () =>
       createSqliteWorkerBackend(undefined, { databasePath }),
     );
     backends.add(task);
+    await task[SQLITE_WORKER_PREPARE_COMMAND]?.("flows.createManaged");
     const database = openOpenClawStateDatabase();
     const flow = buildFlowRecord({
       controllerId: "tests/kv-native-borrow",
@@ -282,6 +327,7 @@ it.each(["kv", "task"] as const)(
       createSqliteWorkerBackend(undefined, { databasePath }),
     );
     backends.add(reopened);
+    await reopened[SQLITE_WORKER_PREPARE_COMMAND]?.("pluginState.lookup");
     expect(
       runWithSqliteWorkerStateContext(reopenedContext, () =>
         reopened.execute({ type: "pluginState.lookup", input: key }),
@@ -306,6 +352,8 @@ it.each(["config.health.patch", "diagnostic.register"] as const)(
       openExistingSqliteWorkerBackend(undefined, { databasePath: context.admission.databasePath }),
     );
     backends.add(first).add(second);
+    await first[SQLITE_WORKER_PREPARE_COMMAND]?.("config.health.read");
+    await second[SQLITE_WORKER_PREPARE_COMMAND]?.(operation);
     expect(
       runWithSqliteWorkerStateContext(context, () =>
         first.execute({ type: "config.health.read", input: { artifactPreserving: false } }),
@@ -356,6 +404,7 @@ it.each(["config.health.patch", "diagnostic.register"] as const)(
       }),
     );
     backends.add(reopened);
+    await reopened[SQLITE_WORKER_PREPARE_COMMAND]?.("config.health.read");
     const reopenedDatabase = openOpenClawStateDatabase();
     if (operation === "config.health.patch") {
       expect(
@@ -387,8 +436,8 @@ it.each(["config.health.patch", "diagnostic.register"] as const)(
 
 it.each(["runtime", "status"] as const)(
   "rejects invalid count input %s only after checking flow ownership",
-  (field) => {
-    const { summary, database } = fixture();
+  async (field) => {
+    const { summary, database } = await fixture();
     database.db.exec(`UPDATE task_runs SET ${field} = 'invalid' WHERE task_id = 'task-0'`);
     expect(summary("agent:other:summary")).toBeUndefined();
     expect(summary(undefined, "missing")).toBeUndefined();
@@ -401,8 +450,8 @@ it.each([
   ["delivery_status", "delivery status"],
   ["notify_policy", "notify policy"],
   ["terminal_outcome", "terminal outcome"],
-] as const)("leaves unused %s validation with full record readers", (field, label) => {
-  const { summary, detail, database } = fixture();
+] as const)("leaves unused %s validation with full record readers", async (field, label) => {
+  const { summary, detail, database } = await fixture();
   database.db.exec(`UPDATE task_runs SET ${field} = 'invalid' WHERE task_id = 'task-0'`);
   expect(summary()).toMatchObject({ total: 4, active: 4, terminal: 0, failures: 0 });
   expect(() => detail()).toThrow(`Invalid persisted task ${label}: "invalid"`);

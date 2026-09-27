@@ -13,6 +13,10 @@ import {
 } from "./bench-agent-concurrency.js";
 import { classifyBoundedUnsignedDecimal } from "./lib/arg-utils.mts";
 
+type BenchmarkRegistryRuntime = Awaited<
+  ReturnType<typeof import("./bench-agent-concurrency-runtime.mjs").installBenchmarkRegistryRuntime>
+>;
+
 type WorkerOptions = {
   scenario: WorkerScenario;
   size: number;
@@ -69,10 +73,6 @@ function parseOptions(argv: string[]): WorkerOptions {
   };
 }
 
-function processMaxRssBytes(): number {
-  return Math.max(0, Math.round(process.resourceUsage().maxRSS * 1024));
-}
-
 async function waitForCondition(check: () => boolean): Promise<boolean> {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
@@ -109,9 +109,6 @@ async function resetRuntime(persist: boolean): Promise<void> {
     import("../src/state/openclaw-agent-db.js"),
   ]);
   subagents.resetSubagentRegistryForTests({ persist });
-  subagents.testing.setDepsForTest();
-  tasks.resetTaskRegistryControlRuntimeForTests();
-  tasks.resetTaskRegistryDeliveryRuntimeForTests();
   tasks.resetDetachedTaskLifecycleRuntimeForTests();
   tasks.resetTaskRegistryForTests({ persist });
   tasks.resetTaskFlowRegistryForTests({ persist });
@@ -180,68 +177,31 @@ function createTerminalWaitBarrier() {
   };
 }
 
-async function configureSpawnRuntime(
-  mode: "memory" | "durable",
-  callGateway: typeof import("../src/gateway/call.js").callGateway,
-): Promise<void> {
-  const [subagents, registry, taskStore, flowStore] = await Promise.all([
-    import("../src/agents/subagents/registry/subagent-registry.test-helpers.js"),
-    import("../src/agents/subagents/registry/subagent-registry-memory.js"),
-    import("../src/tasks/task-registry.store.js"),
-    import("../src/tasks/task-flow-registry.store.test-support.js"),
-  ]);
-  const sharedDeps = {
-    callGateway,
-    getRuntimeConfig: () => ({}),
-    onAgentEvent: () => () => {},
-    resolveAgentTimeoutMs: () => 1_000,
-    captureSubagentCompletionReply: async (childSessionKey: string) => {
-      const entry = [...registry.subagentRuns.values()].find(
-        (candidate) => candidate.childSessionKey === childSessionKey,
-      );
-      if (entry) {
-        // Completion already owns the row at this awaited seam. Suppress only
-        // its unrelated session projection, not the terminal registry/task transition.
-        entry.execution.suppressSessionEffects = true;
-      }
-      return undefined;
-    },
-    cleanupBrowserSessionsForLifecycleEnd: async () => {},
-    runSubagentAnnounceFlow: async () => "retryable" as const,
-    maybeWakeRequesterAfterAllChildrenSettled: async () => false,
-    ensureContextEnginesInitialized: () => {},
-    loadAgentRuntimePluginRegistryHandle: () => undefined,
-    resolveContextEngine: async () =>
-      ({
-        info: { id: "bench", name: "bench", version: "1" },
-        ingest: async () => ({ ok: true }),
-        assemble: async () => ({ messages: [] }),
-        onSubagentEnded: async () => {},
-      }) as unknown as import("../src/context-engine/types.js").ContextEngine,
-  };
-  if (mode === "memory") {
-    subagents.testing.setDepsForTest({
-      ...sharedDeps,
-      persistSubagentRunsToDisk: () => {},
-      persistSubagentRunsToDiskOrThrow: () => {},
-    });
-    taskStore.configureTaskRegistryRuntime({
-      store: {
-        loadSnapshot: () => ({ tasks: new Map(), deliveryStates: new Map() }),
-        upsertTaskWithDeliveryState: () => {},
-        deleteTaskWithDeliveryState: () => {},
-        upsertDeliveryState: () => {},
-        close: () => {},
-      },
-    });
-    const { createInMemoryTaskFlowRegistryStore } =
-      await import("../src/test-utils/task-registry-store.js");
-    flowStore.configureTaskFlowRegistryRuntime({
-      store: createInMemoryTaskFlowRegistryStore(),
-    });
+async function configureSpawnRuntime(mode: "memory" | "durable"): Promise<void> {
+  if (mode === "durable") {
     return;
   }
-  subagents.testing.setDepsForTest(sharedDeps);
+  const [
+    taskStore,
+    flowStore,
+    { createInMemoryTaskRegistryStore, createInMemoryTaskFlowRegistryStore },
+  ] = await Promise.all([
+    import("../src/tasks/task-registry.store.js"),
+    import("../src/tasks/task-flow-registry.store.test-support.js"),
+    import("../src/test-utils/task-registry-store.js"),
+  ]);
+  const inMemoryFlowStore = createInMemoryTaskFlowRegistryStore();
+  taskStore.configureTaskRegistryRuntime({
+    store: {
+      ...createInMemoryTaskRegistryStore(undefined, inMemoryFlowStore),
+      // Memory mode measures runtime projection with empty, no-op task persistence.
+      loadSnapshot: () => ({ tasks: new Map(), deliveryStates: new Map() }),
+      upsertTaskWithDeliveryState: () => {},
+      upsertDeliveryState: () => {},
+      close: () => {},
+    },
+  });
+  flowStore.configureTaskFlowRegistryRuntime({ store: inMemoryFlowStore });
 }
 
 type BenchmarkStateDatabase = Pick<OpenClawStateKyselyDatabase, "subagent_runs" | "task_runs">;
@@ -313,6 +273,7 @@ async function runSpawnSample(
   serial: number,
   mode: "memory" | "durable",
   stateDir: string,
+  registryRuntime: BenchmarkRegistryRuntime,
 ): Promise<Sample> {
   const [pipeline, registry] = await Promise.all([
     import("../src/agents/spawn-pipeline.js"),
@@ -320,7 +281,8 @@ async function runSpawnSample(
   ]);
   await resetRuntime(mode === "durable");
   const barrier = createTerminalWaitBarrier();
-  await configureSpawnRuntime(mode, barrier.callGateway);
+  registryRuntime.setCallGateway(barrier.callGateway);
+  await configureSpawnRuntime(mode);
   const taskRegistry = await import("../src/tasks/task-registry.js");
   let releases = 0;
   const runIds: string[] = [];
@@ -573,21 +535,16 @@ function sweepRow(child: number, generation: number, now: number): SubagentRunRe
     archiveAtMs: current ? undefined : now - 1,
     terminalOwner: current ? "interrupted-recovery" : undefined,
     endedReason: current ? "subagent-error" : undefined,
-    execution: current
-      ? {
-          status: "terminal",
-          startedAt: now - 2_000,
-          endedAt: now - 1_000,
-          outcome: { status: "error", error: "interrupted recovery replay" },
-          suppressSessionEffects: true,
-        }
-      : {
-          status: "terminal",
-          startedAt: now - 2_000,
-          endedAt: now - 1_000,
-          outcome: { status: "error", error: "retired recovery generation" },
-          suppressSessionEffects: true,
-        },
+    execution: {
+      status: "terminal",
+      startedAt: now - 2_000,
+      endedAt: now - 1_000,
+      outcome: {
+        status: "error",
+        error: current ? "interrupted recovery replay" : "retired recovery generation",
+      },
+      suppressSessionEffects: true,
+    },
   };
 }
 
@@ -616,21 +573,11 @@ async function runSweepSample(childCount: number): Promise<Sample> {
     persist: () => {},
     clearPendingLifecycleError: () => {},
     clearPendingLifecycleTimeout: () => {},
-    clearPendingSubagentRecoveryNotice: () => true,
     sweepPendingLifecycle: () => {},
     completeSubagentRunWithRecovery: async () => {
       lostContextCompletions += 1;
     },
     getGatewayRecoveryRuntime: () => undefined,
-    abandonSubagentRestartRecoveryLaunch: () => true,
-    clearAcceptedSubagentRestartRecovery: () => true,
-    resumeSettledSubagentRestartRecovery: () => true,
-    replaceSubagentRunAfterSteer: () => true,
-    markSubagentRestartRecoveryLaunchAttempted: () => undefined,
-    markSubagentRestartRecoveryLaunchAccepted: () => undefined,
-    markSubagentRestartRecoveryLaunchConsumed: () => undefined,
-    reserveSubagentRestartRecoveryLaunch: () => undefined,
-    resetSubagentRestartRecoveryLaunchAttempt: () => true,
     finalizeInterruptedSubagentRun: async ({ runId, expectedEntry }) => {
       if (runs.get(runId) !== expectedEntry || expectedEntry?.generation !== 3) {
         throw new Error(`unexpected recovery projection owner: ${runId}`);
@@ -738,16 +685,30 @@ async function runDedupeSample(childCount: number): Promise<Sample> {
   };
 }
 
-async function runScenario(options: WorkerOptions, stateDir: string): Promise<WorkerResult> {
+async function runScenario(
+  options: WorkerOptions,
+  stateDir: string,
+  rssStartBytes: number,
+  registryRuntime?: BenchmarkRegistryRuntime,
+): Promise<WorkerResult> {
   const timingsMs: number[] = [];
   let invariant: Record<string, number | boolean> = {};
-  const rssStartBytes = process.memoryUsage().rss;
   for (let index = 0; index < options.warmup + options.runs; index += 1) {
     let sample: Sample;
-    if (options.scenario === "spawnPipelineInMemory") {
-      sample = await runSpawnSample(options.size, index, "memory", stateDir);
-    } else if (options.scenario === "spawnPipelineDurable") {
-      sample = await runSpawnSample(options.size, index, "durable", stateDir);
+    if (
+      options.scenario === "spawnPipelineInMemory" ||
+      options.scenario === "spawnPipelineDurable"
+    ) {
+      if (!registryRuntime) {
+        throw new Error("spawn benchmark registry runtime is not installed");
+      }
+      sample = await runSpawnSample(
+        options.size,
+        index,
+        options.scenario === "spawnPipelineInMemory" ? "memory" : "durable",
+        stateDir,
+        registryRuntime,
+      );
     } else if (options.scenario === "admission") {
       sample = await runAdmissionSample(options.size, index);
     } else if (options.scenario === "recoverySweep") {
@@ -767,7 +728,7 @@ async function runScenario(options: WorkerOptions, stateDir: string): Promise<Wo
     memory: {
       rssStartBytes,
       rssEndBytes: process.memoryUsage().rss,
-      processMaxRssBytes: processMaxRssBytes(),
+      processMaxRssBytes: Math.max(0, Math.round(process.resourceUsage().maxRSS * 1024)),
     },
     invariant,
   };
@@ -782,10 +743,22 @@ async function main(): Promise<void> {
   let failure: unknown;
   process.env.OPENCLAW_STATE_DIR = stateDir;
   process.env.NODE_ENV = "test";
+  let registryRuntime: BenchmarkRegistryRuntime | undefined;
   try {
     const { pinRuntimePaths } = await import("../src/config/paths.js");
     pinRuntimePaths();
-    result = await runScenario(options, stateDir);
+    const rssStartBytes = process.memoryUsage().rss;
+    if (
+      options.scenario === "spawnPipelineInMemory" ||
+      options.scenario === "spawnPipelineDurable"
+    ) {
+      const { installBenchmarkRegistryRuntime } =
+        await import("./bench-agent-concurrency-runtime.mjs");
+      registryRuntime = await installBenchmarkRegistryRuntime(
+        options.scenario === "spawnPipelineInMemory" ? "memory" : "durable",
+      );
+    }
+    result = await runScenario(options, stateDir, rssStartBytes, registryRuntime);
   } catch (error) {
     failure = error;
   } finally {
@@ -794,6 +767,11 @@ async function main(): Promise<void> {
     } catch (error) {
       failure ??= error;
     } finally {
+      try {
+        registryRuntime?.close();
+      } catch (error) {
+        failure ??= error;
+      }
       if (previousStateDir === undefined) {
         delete process.env.OPENCLAW_STATE_DIR;
       } else {

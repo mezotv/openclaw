@@ -22,8 +22,12 @@ export async function runAcceptedManagerTurn(params: {
   stopping: boolean;
   turns: AcceptedTurns;
   withSessionActor: WithManagerSessionActor;
-  run: (input: AcpRunTurnInput, acceptedTurn: AcceptedTurnState) => Promise<void>;
-  onQueuedCancellation: () => Promise<void>;
+  run: (
+    input: AcpRunTurnInput,
+    acceptedTurn: AcceptedTurnState,
+    isCurrentActor: () => boolean,
+  ) => Promise<void>;
+  onQueuedCancellation: (assertCurrent: () => void) => Promise<void>;
 }): Promise<void> {
   const { input } = params;
   const instance = input.admittedRunContext.operationalRunInstance;
@@ -54,9 +58,9 @@ export async function runAcceptedManagerTurn(params: {
     try {
       await params.withSessionActor(
         params,
-        async () => {
+        async (isCurrentActor) => {
           started = true;
-          await params.run({ ...input, signal }, turn);
+          await params.run({ ...input, signal }, turn, isCurrentActor);
         },
         signal,
       );
@@ -66,8 +70,16 @@ export async function runAcceptedManagerTurn(params: {
       }
       // The actor still owns its queued callback, which will observe the abort.
       // Finish only this accepted instance; never write idle over its predecessor.
-      turn.revalidateCancel?.();
-      await params.onQueuedCancellation();
+      const assertCancellationCurrent = () => {
+        if (started || params.turns.get(actorKey) !== turns || !turns.has(turn)) {
+          throw new Error("ACP queued cancellation no longer owns its accepted turn", {
+            cause: error,
+          });
+        }
+        turn.revalidateCancel?.();
+      };
+      assertCancellationCurrent();
+      await params.onQueuedCancellation(assertCancellationCurrent);
     }
     completion.resolve();
   } catch (error) {
@@ -75,7 +87,7 @@ export async function runAcceptedManagerTurn(params: {
     throw error;
   } finally {
     turns.delete(turn);
-    if (turns.size === 0) {
+    if (turns.size === 0 && params.turns.get(actorKey) === turns) {
       params.turns.delete(actorKey);
     }
   }
