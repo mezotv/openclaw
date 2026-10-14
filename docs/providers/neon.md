@@ -50,7 +50,7 @@ same isolation your Neon database already has.
 
     ```bash
     export NEON_AI_GATEWAY_BASE_URL="https://<your-neon-branch-host>"
-    export NEON_AI_GATEWAY_TOKEN=nt_live_...
+    export NEON_AI_GATEWAY_TOKEN="example-neon-gateway-token-not-real"
     ```
 
     This is not the database connection string. `<your-neon-branch-host>` is a placeholder: paste the
@@ -166,18 +166,9 @@ a `usage` object on any chunk that carries one, so a provider that reports usage
 is accounted for normally. In practice, not asking usually means no final usage arrives, and a
 streamed turn is then reported at zero tokens.
 
-If you set `compat: { supportsUsageInStreaming: true }` to recover token counts, be aware that the
-`gemini-` models may reject the field. Neon serves that family by translating the request into a
-Gemini `generation_config`, which has no `stream_options`, and an unknown field there is rejected
-rather than ignored. Sending it against a `gemini-` model on a Neon branch returned:
-
-```text
-Invalid JSON payload received. Unknown name "stream_options" at 'generation_config'
-```
-
-That is an observation from one branch rather than a documented Neon contract, and the same request
-succeeded against the non-Gemini chat models on that branch. Treat it as a reason to enable the flag
-per model rather than across the whole provider.
+Enable `compat: { supportsUsageInStreaming: true }` only after verifying that the selected model
+accepts `stream_options` and returns usage. Keep this override per model: support can differ between
+the upstream providers that Neon routes to.
 
 ## Models
 
@@ -195,8 +186,9 @@ Neon returns that list in an OpenRouter-shaped response, but `pricing`, `context
 [Neon model catalog](https://neon.com/docs/ai-gateway/models). The same catalog is browsable on
 [models.dev](https://models.dev/providers/neon/).
 
-Open-weight models are available to every project immediately. Frontier models from OpenAI and
-Google roll out gradually, so a catalog model may not be enabled for your project yet.
+Neon's [model access documentation](https://neon.com/docs/ai-gateway/overview#model-access) states
+that paid projects with prepaid credits can use the catalog. Check the `enabled` field in your
+branch's response before selecting a model; contact Neon support if access is unexpectedly disabled.
 
 ## Advanced
 
@@ -214,11 +206,10 @@ Google roll out gradually, so a catalog model may not be enabled for your projec
   <Accordion title="Models that require the Responses API">
     Neon exposes the [OpenAI Responses API](https://neon.com/docs/ai-gateway/openai-responses) under
     `/openai/v1` rather than `/v1`. Most OpenAI models answer on both endpoints, but a few are served
-    only through Responses and are rejected by chat completions. The Endpoints column in Neon's
-    [model catalog](https://neon.com/docs/ai-gateway/models) is what marks them: a model listed only
-    as `openai/responses` needs the configuration below. That set changes as Neon adds and retires
-    models, so read the column rather than trusting a list copied into a page; at the time of writing
-    it is `gpt-5-3-codex` and `gpt-5-5-pro`.
+    only through Responses and are rejected by chat completions. Check Neon's
+    [endpoint guide](https://neon.com/docs/ai-gateway/models#which-endpoint-to-use) and
+    [Responses model list](https://neon.com/docs/ai-gateway/openai-responses#supported-models)
+    before choosing a model. Models that require Responses need the configuration below.
 
     Reach them with a second provider entry using the `openai-responses` API and that base URL, which
     is the same branch host you substituted above with `/openai/v1` on the end:
@@ -256,8 +247,8 @@ Google roll out gradually, so a catalog model may not be enabled for your projec
     Neon also exposes the [Anthropic Messages API](https://neon.com/docs/ai-gateway/anthropic-messages)
     under `/anthropic`, where the Anthropic SDK appends `/v1/messages`. This dialect is Claude only, and
     it reaches native Anthropic features that the OpenAI-compatible `/v1` path cannot express, such
-    as extended thinking and opt-in prompt caching. Prompt caching here is not automatic; you enable it
-    with `cacheRetention`, as the configuration below shows. Reach it with a second provider entry using the
+    as extended thinking and prompt caching. Set `cacheRetention` explicitly to choose retention,
+    as the configuration below shows. Reach it with a second provider entry using the
     `anthropic-messages` API and the `/anthropic` base URL, the same shape as the bundled
     Anthropic-compatible provider examples:
 
@@ -268,6 +259,7 @@ Google roll out gradually, so a catalog model may not be enabled for your projec
           "neon-anthropic": {
             baseUrl: "https://<your-neon-branch-host>/anthropic",
             apiKey: "${NEON_AI_GATEWAY_TOKEN}",
+            authHeader: true,
             api: "anthropic-messages",
             models: [
               {
@@ -299,9 +291,11 @@ Google roll out gradually, so a catalog model may not be enabled for your projec
     `cost` from the [Neon model catalog](https://neon.com/docs/ai-gateway/models), and take
     `contextWindow` from that catalog as well.
 
-    OpenClaw seeds a default `cacheRetention` only for direct Anthropic routes, so on a custom
-    `anthropic-messages` endpoint like Neon you set `params.cacheRetention` yourself under
-    `agents.defaults.models`, as the example above does. Use `"short"` for the 5-minute cache or
+    Set `authHeader: true` because Neon requires a bearer credential, including on this
+    Anthropic-compatible endpoint.
+
+    Set `params.cacheRetention` under `agents.defaults.models`, as the example above does, to choose
+    caching behavior for this custom `anthropic-messages` route. Use `"short"` for the 5-minute cache or
     `"long"` for the 1-hour TTL; `"none"` disables it. See [Prompt caching](/reference/prompt-caching).
 
     Two behaviors matter here:
@@ -323,23 +317,23 @@ Google roll out gradually, so a catalog model may not be enabled for your projec
   </Accordion>
 
   <Accordion title="Response shape">
-    For most models `message.content` is a plain string. Neon documents Gemini 3.x, `gpt-oss-120b`,
-    and `qwen35-122b-a10b` as returning an array of typed content blocks instead. OpenClaw's
+    For most models `message.content` is a plain string. Some models return an array of typed
+    content blocks instead; see Neon's [content-shape guidance](https://neon.com/docs/ai-gateway/models#content-shape-varies-by-model). OpenClaw's
     `openai-completions` transport flattens those blocks on the way in, treating `text` blocks as
     assistant output and `reasoning` blocks as thinking, so nothing in your config has to handle the
     array form.
 
-    A low output-token limit can still cut a response off before the text block appears. The turn
-    then carries only a reasoning block, which reads as an empty reply unless reasoning output is
-    turned on. Raising `maxTokens` is the fix.
+    A low output-token limit can cut a response off before the text block appears. If the response
+    contains reasoning but no answer, check the finish reason and output-token budget before raising
+    `maxTokens`.
 
   </Accordion>
 
   <Accordion title="Proxy behavior notes">
-    - Native-OpenAI-only request shaping does not apply through a Neon base URL: no `service_tier`,
-      no Responses `store`, no prompt-cache hints, no OpenAI reasoning-effort payload shaping.
-    - Hidden OpenClaw attribution headers (`originator`, `version`, `User-Agent`) are only sent to
-      verified native OpenAI endpoints, so they are not injected on a Neon base URL.
+    - Custom reasoning models marked `reasoning: true` support OpenAI-style reasoning controls.
+      With `openai-completions`, selecting a thinking level can send `reasoning_effort` to Neon.
+      If the upstream model rejects that field, set `compat.supportsReasoningEffort: false` on that
+      model entry.
     - Inference uses prepaid credits on a paid plan. Neon charges the model provider's per-token rate with no markup. See the [AI Gateway overview](https://neon.com/docs/ai-gateway/overview).
   </Accordion>
 
@@ -347,9 +341,9 @@ Google roll out gradually, so a catalog model may not be enabled for your projec
     Neon's [troubleshooting guide](https://neon.com/docs/ai-gateway/troubleshooting) covers the errors
     you are most likely to hit:
 
-    - `403 model requires a verified account` is a per-model gate. It mirrors `enabled: false` for that
-      model in `GET /v1/models`, so a model your project cannot use yet fails here rather than in your
-      OpenClaw config.
+    - For account-access errors, check the model's `enabled` field in `GET /v1/models`. If your
+      project has a paid plan and prepaid credits but access is disabled, contact Neon support.
+      For credential errors, check the `ai_gateway:invoke` scope and branch lineage.
     - `400 model "<model-id>" is not available on the <endpoint> endpoint` means the model ID does not
       belong to the dialect you called, such as an OpenAI ID sent to `/anthropic` or a Claude ID sent to
       `/openai/v1`. Use the provider entry that matches the model.
